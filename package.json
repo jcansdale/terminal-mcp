@@ -1,0 +1,76 @@
+{
+	"name": "terminal-mcp",
+	"displayName": "Terminal MCP",
+	"description": "A VS Code extension that exposes terminal tools through a local MCP server.",
+	"version": "0.0.1",
+	"private": true,
+	"publisher": "jcansdale",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/jcansdale/terminal-mcp.git"
+	},
+	"bugs": {
+		"url": "https://github.com/jcansdale/terminal-mcp/issues"
+	},
+	"homepage": "https://github.com/jcansdale/terminal-mcp#readme",
+	"keywords": [
+		"vscode",
+		"extension",
+		"mcp",
+		"terminal"
+	],
+	"engines": {
+		"vscode": "^1.99.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [
+		"onStartupFinished"
+	],
+	"enabledApiProposals": [
+		"terminalDataWriteEvent",
+		"mcpToolDefinitions"
+	],
+	"main": "./dist/extension.js",
+	"contributes": {
+		"commands": [
+			{
+				"command": "terminalMcp.showServerUrl",
+				"title": "Terminal MCP: Show Server URL"
+			},
+			{
+				"command": "terminalMcp.restartServer",
+				"title": "Terminal MCP: Restart Server"
+			}
+		],
+		"mcpServerDefinitionProviders": [
+			{
+				"id": "terminal-mcp.provider",
+				"label": "Terminal MCP"
+			}
+		]
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE",
+		"package.json"
+	],
+	"scripts": {
+		"build": "node ./esbuild.mjs",
+		"watch": "node ./esbuild.mjs --watch",
+		"check": "tsc --noEmit -p ./tsconfig.json"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.27.1",
+		"zod": "^4.1.5"
+	},
+	"devDependencies": {
+		"@types/vscode": "^1.110.0",
+		"@types/node": "^22.13.10",
+		"esbuild": "^0.25.1",
+		"typescript": "^5.8.2"
+	}
+}
