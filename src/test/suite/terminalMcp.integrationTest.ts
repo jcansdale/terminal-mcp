@@ -301,6 +301,36 @@ suite('Terminal MCP integration', () => {
 		}
 	});
 
+	test('runInTerminal handles 100 single-line commands in rapid succession through the reused shell', async function () {
+		this.timeout(120000);
+		const client = await createClient();
+
+		try {
+			const probe = await probeSharedShellIntegration(client);
+			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
+				this.skip();
+			}
+
+			const iterations = 100;
+			for (let i = 1; i <= iterations; i++) {
+				const token = `iteration-${i}`;
+				const command = `echo ${token} | wc -c`;
+				const expectedCount = String(Buffer.byteLength(`${token}\n`, 'utf8'));
+
+				const textContent = await runForegroundCommand(
+					client,
+					command,
+					`Single-line iteration ${i}/${iterations}.`,
+					`Verify single-line reuse at iteration ${i}.`
+				);
+				assertCommandFinished(textContent);
+				assertCapturedCount(textContent, expectedCount);
+			}
+		} finally {
+			await client.close();
+		}
+	});
+
 	test('large multiline command succeeds when wrapped in bracketed paste mode', async function () {
 		const client = await createClient();
 
