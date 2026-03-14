@@ -3,7 +3,8 @@ import * as vscode from 'vscode';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-const SHARED_TERMINAL_NAME = 'Copilot Zsh';
+const DEFAULT_TERMINAL_NAME = 'Terminal MCP';
+const CUSTOM_PROFILE_TERMINAL_NAME = 'Copilot Zsh';
 const SHELL_INTEGRATION_WARMUP_COMMAND = 'printf shell-integration-ready';
 
 const PAYLOAD_LINES = [
@@ -35,11 +36,6 @@ const MULTILINE_WC_EXPECTED_COUNT = String(Buffer.byteLength(`${MULTILINE_PAYLOA
 
 async function createClient(): Promise<Client> {
 	await vscode.workspace.getConfiguration('terminal.integrated').update('shellIntegration.enabled', true, vscode.ConfigurationTarget.Workspace);
-	await vscode.workspace.getConfiguration().update('chat.tools.terminal.terminalProfile.osx', {
-		title: 'Copilot Zsh',
-		path: '/bin/zsh',
-		icon: 'robot'
-	}, vscode.ConfigurationTarget.Workspace);
 
 	const extension = vscode.extensions.getExtension('jcansdale.terminal-mcp');
 	assert.ok(extension, 'Expected extension to be available in the extension host');
@@ -105,10 +101,10 @@ function assertCapturedCount(textContent: string, expectedCount: string): void {
 	}
 }
 
-async function waitForSharedTerminal(timeoutMs = 5000): Promise<vscode.Terminal | undefined> {
+async function waitForSharedTerminal(name: string, timeoutMs = 5000): Promise<vscode.Terminal | undefined> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
-		const terminal = vscode.window.terminals.find(candidate => candidate.name === SHARED_TERMINAL_NAME);
+		const terminal = vscode.window.terminals.find(candidate => candidate.name === name);
 		if (terminal) {
 			return terminal;
 		}
@@ -116,7 +112,7 @@ async function waitForSharedTerminal(timeoutMs = 5000): Promise<vscode.Terminal 
 		await new Promise(resolve => setTimeout(resolve, 50));
 	}
 
-	return vscode.window.terminals.find(candidate => candidate.name === SHARED_TERMINAL_NAME);
+	return vscode.window.terminals.find(candidate => candidate.name === name);
 }
 
 async function waitForShellIntegration(terminal: vscode.Terminal, timeoutMs = 5000): Promise<boolean> {
@@ -132,7 +128,7 @@ async function waitForShellIntegration(terminal: vscode.Terminal, timeoutMs = 50
 	return terminal.shellIntegration !== undefined;
 }
 
-async function probeSharedShellIntegration(client: Client): Promise<{
+async function probeSharedShellIntegration(client: Client, terminalName: string): Promise<{
 	warmUpOutput: string;
 	terminal: vscode.Terminal | undefined;
 	hasShellIntegration: boolean;
@@ -145,7 +141,7 @@ async function probeSharedShellIntegration(client: Client): Promise<{
 	);
 	assertCommandFinished(warmUpOutput);
 
-	const terminal = await waitForSharedTerminal();
+	const terminal = await waitForSharedTerminal(terminalName);
 	const hasShellIntegration = terminal ? await waitForShellIntegration(terminal, 15000) : false;
 
 	return {
@@ -183,8 +179,8 @@ suite('Terminal MCP integration', () => {
 		const client = await createClient();
 
 		try {
-			const probe = await probeSharedShellIntegration(client);
-			assert.ok(probe.terminal, `Expected the shared terminal ${SHARED_TERMINAL_NAME} to be created during warm-up.`);
+			const probe = await probeSharedShellIntegration(client, DEFAULT_TERMINAL_NAME);
+			assert.ok(probe.terminal, `Expected the shared terminal ${DEFAULT_TERMINAL_NAME} to be created during warm-up.`);
 			assert.ok(
 				probe.hasShellIntegration && !hasFallbackWarning(probe.warmUpOutput),
 				`Expected shell integration to activate for the shared foreground terminal. Output:\n${probe.warmUpOutput}`
@@ -198,7 +194,7 @@ suite('Terminal MCP integration', () => {
 		const client = await createClient();
 
 		try {
-			const probe = await probeSharedShellIntegration(client);
+			const probe = await probeSharedShellIntegration(client, DEFAULT_TERMINAL_NAME);
 			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
 				this.skip();
 			}
@@ -220,7 +216,7 @@ suite('Terminal MCP integration', () => {
 		const client = await createClient();
 
 		try {
-			const probe = await probeSharedShellIntegration(client);
+			const probe = await probeSharedShellIntegration(client, DEFAULT_TERMINAL_NAME);
 			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
 				this.skip();
 			}
@@ -243,6 +239,28 @@ suite('Terminal MCP integration', () => {
 			assertCommandFinished(secondRun);
 			assertCapturedCount(secondRun, MULTILINE_WC_EXPECTED_COUNT);
 		} finally {
+			await client.close();
+		}
+	});
+
+	test('runInTerminal activates shell integration with a custom Copilot Zsh terminal profile', async function () {
+		const client = await createClient();
+
+		try {
+			await vscode.workspace.getConfiguration().update('chat.tools.terminal.terminalProfile.osx', {
+				title: 'Copilot Zsh',
+				path: '/bin/zsh',
+				icon: 'robot'
+			}, vscode.ConfigurationTarget.Workspace);
+
+			const probe = await probeSharedShellIntegration(client, CUSTOM_PROFILE_TERMINAL_NAME);
+			assert.ok(probe.terminal, `Expected the shared terminal ${CUSTOM_PROFILE_TERMINAL_NAME} to be created during warm-up.`);
+			assert.ok(
+				probe.hasShellIntegration && !hasFallbackWarning(probe.warmUpOutput),
+				`Expected shell integration to activate for the custom profile terminal. Output:\n${probe.warmUpOutput}`
+			);
+		} finally {
+			await vscode.workspace.getConfiguration().update('chat.tools.terminal.terminalProfile.osx', undefined, vscode.ConfigurationTarget.Workspace);
 			await client.close();
 		}
 	});
