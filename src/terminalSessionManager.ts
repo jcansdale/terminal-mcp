@@ -138,13 +138,10 @@ export class TerminalSessionManager implements vscode.Disposable {
 		const isMultiline = params.command.includes('\n');
 
 		if (isMultiline) {
-			// Multiline commands are sent line-by-line via sendText to avoid PTY corruption.
-			// We send OSC 633;C (pre-execution marker) so shell integration tracks completion.
-			// Output is captured via raw terminal data since we don't have a TerminalShellExecution.
-			execution.useRawDataCapture = true;
-
-			const OSC_633_C = '\x1b]633;C\x07';
-			terminal.sendText(OSC_633_C, false);
+			// Multiline commands: use executeCommand('') to get a TerminalShellExecution
+			// for tracking, then send the actual command line-by-line via sendText
+			// to avoid PTY corruption from writing large content in a single chunk.
+			const shellExecution = shellIntegration.executeCommand('');
 
 			const lines = params.command.split('\n');
 			for (let i = 0; i < lines.length; i++) {
@@ -156,32 +153,13 @@ export class TerminalSessionManager implements vscode.Disposable {
 				}
 			}
 
-			// Listen for completion via both onDidEndTerminalShellExecution and
-			// the OSC 633;D sequence in raw output (belt and suspenders).
+			void this._consumeExecutionOutput(execution, shellExecution);
 			const completionDisposable = vscode.window.onDidEndTerminalShellExecution(event => {
-				if (event.terminal === terminal && !execution.completed) {
+				if (event.execution === shellExecution) {
 					execution.exitCode = event.exitCode;
 					execution.completed = true;
 					execution.resolveCompletion();
 					completionDisposable.dispose();
-					oscListener.dispose();
-				}
-			});
-
-			// Also watch for OSC 633;D in raw terminal data as a fallback
-			let rawBuffer = '';
-			const oscListener = vscode.window.onDidWriteTerminalData(event => {
-				if (event.terminal === terminal && !execution.completed) {
-					rawBuffer += event.data;
-					// OSC 633;D [; exitcode] ST — match the D sequence
-					const match = rawBuffer.match(/\x1b\]633;D(?:;(\d+))?\x07/);
-					if (match) {
-						execution.exitCode = match[1] !== undefined ? Number(match[1]) : undefined;
-						execution.completed = true;
-						execution.resolveCompletion();
-						completionDisposable.dispose();
-						oscListener.dispose();
-					}
 				}
 			});
 
