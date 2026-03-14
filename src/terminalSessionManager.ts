@@ -198,6 +198,7 @@ export class TerminalSessionManager implements vscode.Disposable {
 		return execution;
 	}
 
+
 	private _createBackgroundTerminal(goal: string): vscode.Terminal {
 		const profile = this._getChatTerminalProfile();
 		return vscode.window.createTerminal({
