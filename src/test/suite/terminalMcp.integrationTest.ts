@@ -192,6 +192,32 @@ suite('Terminal MCP integration', () => {
 		}
 	});
 
+	test('runInTerminal handles a single very long line (5KB) once shell integration is active', async function () {
+		const client = await createClient();
+
+		try {
+			const probe = await probeSharedShellIntegration(client);
+			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
+				this.skip();
+			}
+
+			const longPayload = 'Z'.repeat(5000);
+			const longLineCommand = `echo '${longPayload}' | wc -c`;
+			const expectedCount = String(Buffer.byteLength(`${longPayload}\n`, 'utf8'));
+
+			const textContent = await runForegroundCommand(
+				client,
+				longLineCommand,
+				'Count the bytes emitted by a very long single-line echo payload.',
+				'Verify a 5KB single-line command survives end-to-end execution.'
+			);
+			assertCommandFinished(textContent);
+			assertCapturedCount(textContent, expectedCount);
+		} finally {
+			await client.close();
+		}
+	});
+
 	test('runInTerminal handles a multiline echo and wc command once shell integration is active', async function () {
 		const client = await createClient();
 
@@ -326,6 +352,55 @@ suite('Terminal MCP integration', () => {
 				assertCommandFinished(textContent);
 				assertCapturedCount(textContent, expectedCount);
 			}
+		} finally {
+			await client.close();
+		}
+	});
+
+	test('single long line stress test — increasing sizes', async function () {
+		this.timeout(120000);
+		const client = await createClient();
+
+		try {
+			const probe = await probeSharedShellIntegration(client);
+			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
+				this.skip();
+			}
+
+			const sizes = [100, 500, 1000, 2000, 5000, 10000, 20000, 50000];
+			const results: { bytes: number; passed: boolean; timeMs: number }[] = [];
+
+			for (const size of sizes) {
+				const payload = 'X'.repeat(size);
+				const command = `echo '${payload}' | wc -c`;
+				const expectedCount = String(Buffer.byteLength(`${payload}\n`, 'utf8'));
+
+				const start = Date.now();
+				const textContent = await runForegroundCommand(
+					client,
+					command,
+					`Single long line of ${size} bytes.`,
+					`Verify a ${size}-byte single-line command survives.`
+				);
+				const elapsed = Date.now() - start;
+
+				const passed = /Command finished/.test(textContent) &&
+					new RegExp(`(^|\\D)${expectedCount}(\\D|$)`).test(textContent);
+
+				results.push({ bytes: size, passed, timeMs: elapsed });
+				console.log(`Single long line: ${size} bytes — ${passed ? 'PASS' : 'FAIL'} in ${elapsed}ms`);
+
+				if (!passed) {
+					break;
+				}
+			}
+
+			const summary = results.map(r =>
+				`${r.bytes} bytes: ${r.passed ? 'PASS' : 'FAIL'} (${r.timeMs}ms)`
+			).join('\n');
+
+			const allPassed = results.every(r => r.passed);
+			assert.ok(allPassed, `Single long line stress test results:\n${summary}`);
 		} finally {
 			await client.close();
 		}
