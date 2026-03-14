@@ -167,6 +167,48 @@ suite('Terminal MCP integration', () => {
 		}
 	});
 
+	test('line-by-line mitigation: 100-line payload sent as individual sendText calls', async function () {
+		this.timeout(60000);
+		const client = await createClient();
+		try {
+			const terminal = await requireShellIntegration(client, this);
+
+			let output = '';
+			const listener = vscode.window.onDidWriteTerminalData(e => {
+				if (e.terminal === terminal) output += e.data;
+			});
+
+			// Build the command as: echo 'line1\nline2\n...' | wc -c
+			// but send each physical line of the command separately
+			const lines = LARGE_MULTILINE_WC_COMMAND.split('\n');
+			for (let i = 0; i < lines.length; i++) {
+				// sendText with addNewline=false for all but the last line
+				if (i < lines.length - 1) {
+					terminal.sendText(lines[i], false);
+					terminal.sendText('\n', false);
+				} else {
+					// Last line — send with addNewline=true to execute
+					terminal.sendText(lines[i], true);
+				}
+			}
+
+			const deadline = Date.now() + 30000;
+			let found = false;
+			while (Date.now() < deadline) {
+				if (new RegExp(`(^|\\D)${LARGE_MULTILINE_WC_EXPECTED_COUNT}(\\D|$)`).test(output)) {
+					found = true;
+					break;
+				}
+				await new Promise(r => setTimeout(r, 100));
+			}
+			listener.dispose();
+
+			assert.ok(found, `Expected byte count ${LARGE_MULTILINE_WC_EXPECTED_COUNT} in output:\n${output.slice(-500)}`);
+		} finally {
+			await client.close();
+		}
+	});
+
 	test('single long line stress: increasing sizes via executeCommand', async function () {
 		this.timeout(120000);
 		const client = await createClient();
