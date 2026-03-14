@@ -327,8 +327,8 @@ suite('Terminal MCP integration', () => {
 		}
 	});
 
-	test('runInTerminal handles 100 single-line commands in rapid succession through the reused shell', async function () {
-		this.timeout(120000);
+	test('runInTerminal handles 1000 single-line commands in rapid succession through the reused shell', async function () {
+		this.timeout(300000);
 		const client = await createClient();
 
 		try {
@@ -337,20 +337,29 @@ suite('Terminal MCP integration', () => {
 				this.skip();
 			}
 
-			const iterations = 100;
+			const iterations = 1000;
 			for (let i = 1; i <= iterations; i++) {
-				const token = `iteration-${i}`;
+				const token = `iter-${i}`;
 				const command = `echo ${token} | wc -c`;
 				const expectedCount = String(Buffer.byteLength(`${token}\n`, 'utf8'));
 
 				const textContent = await runForegroundCommand(
 					client,
 					command,
-					`Single-line iteration ${i}/${iterations}.`,
-					`Verify single-line reuse at iteration ${i}.`
+					`Iteration ${i}/${iterations}.`,
+					`Verify reuse at iteration ${i}.`
 				);
-				assertCommandFinished(textContent);
-				assertCapturedCount(textContent, expectedCount);
+
+				const passed = /Command finished/.test(textContent) &&
+					new RegExp(`(^|\\D)${expectedCount}(\\D|$)`).test(textContent);
+
+				if (!passed) {
+					assert.fail(`Failed at iteration ${i}/${iterations}. Output:\n${textContent}`);
+				}
+
+				if (i % 100 === 0) {
+					console.log(`Tiny payload reuse: ${i}/${iterations} passed`);
+				}
 			}
 		} finally {
 			await client.close();
