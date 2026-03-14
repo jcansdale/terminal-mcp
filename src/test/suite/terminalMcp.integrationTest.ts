@@ -146,7 +146,7 @@ async function probeSharedShellIntegration(client: Client): Promise<{
 	assertCommandFinished(warmUpOutput);
 
 	const terminal = await waitForSharedTerminal();
-	const hasShellIntegration = terminal ? await waitForShellIntegration(terminal) : false;
+	const hasShellIntegration = terminal ? await waitForShellIntegration(terminal, 15000) : false;
 
 	return {
 		warmUpOutput,
