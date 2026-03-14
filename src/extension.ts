@@ -15,10 +15,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		void vscode.window.showInformationMessage(`Terminal MCP server URL copied to clipboard: ${serverUrl}`);
 	});
 
+	const getServerUrl = vscode.commands.registerCommand('terminalMcp._getServerUrl', async () => {
+		const serverUrl = await mcpServer.start();
+		return serverUrl.toString();
+	});
+
 	const restartServer = vscode.commands.registerCommand('terminalMcp.restartServer', async () => {
 		await mcpServer.stop();
 		const restartedUrl = await mcpServer.start();
 		void vscode.window.showInformationMessage(`Terminal MCP server restarted at ${restartedUrl.toString()}`);
+	});
+
+	const showShellIntegrationStatus = vscode.commands.registerCommand('terminalMcp.showShellIntegrationStatus', async () => {
+		const terminal = vscode.window.activeTerminal;
+		if (!terminal) {
+			void vscode.window.showInformationMessage('No active terminal to inspect for shell integration.');
+			return;
+		}
+
+		const status = terminal.shellIntegration ? 'active' : 'not active';
+		void vscode.window.showInformationMessage(`Shell integration is ${status} for the active terminal: ${terminal.name}`);
 	});
 
 	const provider = vscode.lm.registerMcpServerDefinitionProvider(MCP_PROVIDER_ID, {
@@ -37,7 +53,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	context.subscriptions.push(
 		terminalManager,
 		showServerUrl,
+		getServerUrl,
 		restartServer,
+		showShellIntegrationStatus,
 		provider,
 		new vscode.Disposable(() => {
 			void mcpServer.stop();

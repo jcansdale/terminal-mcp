@@ -68,6 +68,7 @@ If the chat-specific setting is not configured, the extension falls back to the 
 npm install
 npm run check
 npm run build
+npm test
 ```
 
 Useful commands after loading the extension:

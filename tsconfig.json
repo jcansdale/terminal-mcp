@@ -12,7 +12,8 @@
 		"noUnusedParameters": true,
 		"rootDir": "./src",
 		"types": [
-			"node"
+			"node",
+			"mocha"
 		],
 		"skipLibCheck": true
 	},
