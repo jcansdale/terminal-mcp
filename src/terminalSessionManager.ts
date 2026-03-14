@@ -138,24 +138,22 @@ export class TerminalSessionManager implements vscode.Disposable {
 		const isMultiline = params.command.includes('\n');
 
 		if (isMultiline) {
-			// Multiline commands: use executeCommand('') to get a TerminalShellExecution
-			// for tracking, then send the actual command line-by-line via sendText
-			// to avoid PTY corruption from writing large content in a single chunk.
-			const shellExecution = shellIntegration.executeCommand('');
+			// Multiline commands: executeCommand() writes the entire command in one
+			// PTY chunk and corrupts above a size threshold. Instead we:
+			// 1. Send OSC 633;C to notify VS Code a command is starting
+			// 2. Send lines one-by-one via sendText to avoid PTY corruption
+			// 3. Capture output via onDidWriteTerminalData (raw, same as useRawDataCapture)
+			// 4. Use onDidEndTerminalShellExecution for completion detection.
+			// 5. Wait 2s after completion to let any trailing output arrive before finalizing.
+			//    VS Code can fire onDidEndTerminalShellExecution before the corresponding
+			//    onDidWriteTerminalData event for the same PTY chunk (the chunk that contains
+			//    both the command output and the OSC 633;D sequence).
+			execution.useRawDataCapture = true;
 
-			const lines = params.command.split('\n');
-			for (let i = 0; i < lines.length; i++) {
-				if (i < lines.length - 1) {
-					terminal.sendText(lines[i], false);
-					terminal.sendText('\n', false);
-				} else {
-					terminal.sendText(lines[i], true);
-				}
-			}
-
-			void this._consumeExecutionOutput(execution, shellExecution);
+			let capturedExitCode: number | undefined = undefined;
 			const completionDisposable = vscode.window.onDidEndTerminalShellExecution(event => {
-				if (event.execution === shellExecution) {
+				if (event.terminal === terminal) {
+					capturedExitCode = event.exitCode;
 					execution.exitCode = event.exitCode;
 					execution.completed = true;
 					execution.resolveCompletion();
@@ -163,14 +161,31 @@ export class TerminalSessionManager implements vscode.Disposable {
 				}
 			});
 
+			// OSC 633;C signals pre-execution. Must be sent before the command lines
+			// so VS Code can associate the subsequent shell-emitted 633;D correctly.
+			terminal.sendText('\x1b]633;C\x07', false);
+			const lines = params.command.split('\n');
+			for (let i = 0; i < lines.length; i++) {
+				const isLast = i === lines.length - 1;
+				if (isLast) {
+					terminal.sendText(lines[i], true);
+				} else {
+					terminal.sendText(lines[i], false);
+					terminal.sendText('\n', false);
+				}
+			}
+
 			if (params.isBackground) {
 				return { id: execution.id };
 			}
 
 			const didTimeOut = await this._awaitWithTimeout(execution.completionPromise, Math.max(0, params.timeout));
+			if (!didTimeOut) {
+				await new Promise(r => setTimeout(r, 2000));
+			}
 			return {
 				output: this._finalizeOutput(execution.output),
-				exitCode: didTimeOut ? undefined : execution.exitCode,
+				exitCode: didTimeOut ? undefined : capturedExitCode,
 				timedOut: didTimeOut,
 				warning: execution.warning,
 			};
