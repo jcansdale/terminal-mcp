@@ -274,22 +274,27 @@ suite('Terminal MCP integration', () => {
 				}
 			}
 
-			// Wait for either completion event or byte count in output
+			// Wait for both: completion event AND byte count in output.
+			// onDidEndTerminalShellExecution can fire before onDidWriteTerminalData
+			// delivers the trailing output, so we keep polling for 2s after completion.
 			const deadline = Date.now() + 30000;
 			let foundCount = false;
+			let completedAt: number | undefined;
 			while (Date.now() < deadline) {
 				if (new RegExp(`(^|\\D)${LARGE_MULTILINE_WC_EXPECTED_COUNT}(\\D|$)`).test(output)) {
 					foundCount = true;
 				}
-				if (executionCompleted || foundCount) {
+				if (executionCompleted && completedAt === undefined) {
+					completedAt = Date.now();
+				}
+				if (foundCount) {
+					break;
+				}
+				// Once completed, give 2s for trailing output before giving up
+				if (completedAt !== undefined && Date.now() - completedAt > 2000) {
 					break;
 				}
 				await new Promise(r => setTimeout(r, 100));
-			}
-
-			// Wait a bit more for the completion event if we got the count
-			if (foundCount && !executionCompleted) {
-				await new Promise(r => setTimeout(r, 2000));
 			}
 
 			completionListener.dispose();
