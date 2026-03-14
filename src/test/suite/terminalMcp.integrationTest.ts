@@ -25,6 +25,7 @@ const LARGE_MULTILINE_WC_EXPECTED_COUNT = String(Buffer.byteLength(`${LARGE_MULT
 
 async function createClient(): Promise<Client> {
 	await vscode.workspace.getConfiguration('terminal.integrated').update('shellIntegration.enabled', true, vscode.ConfigurationTarget.Workspace);
+	await vscode.workspace.getConfiguration('terminal.integrated').update('defaultProfile.osx', 'zsh', vscode.ConfigurationTarget.Workspace);
 	const extension = vscode.extensions.getExtension('jcansdale.terminal-mcp');
 	assert.ok(extension, 'Extension not available');
 	await extension.activate();
