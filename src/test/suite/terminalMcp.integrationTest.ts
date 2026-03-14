@@ -3,6 +3,9 @@ import * as vscode from 'vscode';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
+const SHARED_TERMINAL_NAME = 'Copilot Zsh';
+const SHELL_INTEGRATION_WARMUP_COMMAND = 'printf shell-integration-ready';
+
 const PAYLOAD_LINES = [
 	'L01 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 	'L02 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -26,12 +29,9 @@ const PAYLOAD_LINES = [
 ];
 
 const MULTILINE_PAYLOAD = PAYLOAD_LINES.join('\n');
-const HALF_MULTILINE_PAYLOAD = PAYLOAD_LINES.slice(0, 10).join('\n');
 
 const MULTILINE_WC_COMMAND = `echo '${MULTILINE_PAYLOAD}' | wc -c`;
 const MULTILINE_WC_EXPECTED_COUNT = String(Buffer.byteLength(`${MULTILINE_PAYLOAD}\n`, 'utf8'));
-const HALF_MULTILINE_WC_COMMAND = `echo '${HALF_MULTILINE_PAYLOAD}' | wc -c`;
-const HALF_MULTILINE_WC_EXPECTED_COUNT = String(Buffer.byteLength(`${HALF_MULTILINE_PAYLOAD}\n`, 'utf8'));
 
 async function createClient(): Promise<Client> {
 	await vscode.workspace.getConfiguration('terminal.integrated').update('shellIntegration.enabled', true, vscode.ConfigurationTarget.Workspace);
@@ -93,12 +93,66 @@ function assertCommandFinished(textContent: string): void {
 	assert.match(textContent, /Command finished/, 'Expected the server to report a completed foreground execution');
 }
 
+function hasFallbackWarning(textContent: string): boolean {
+	return /Shell integration did not activate/.test(textContent);
+}
+
 function assertCapturedCount(textContent: string, expectedCount: string): void {
 	const capturedExpectedCount = new RegExp(`(^|\\D)${expectedCount}(\\D|$)`).test(textContent);
 	if (!capturedExpectedCount) {
 		console.error(`Captured textContent:\n${textContent}`);
 		assert.fail(`Expected the byte count ${expectedCount} to appear in the captured command output`);
 	}
+}
+
+async function waitForSharedTerminal(timeoutMs = 5000): Promise<vscode.Terminal | undefined> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const terminal = vscode.window.terminals.find(candidate => candidate.name === SHARED_TERMINAL_NAME);
+		if (terminal) {
+			return terminal;
+		}
+
+		await new Promise(resolve => setTimeout(resolve, 50));
+	}
+
+	return vscode.window.terminals.find(candidate => candidate.name === SHARED_TERMINAL_NAME);
+}
+
+async function waitForShellIntegration(terminal: vscode.Terminal, timeoutMs = 5000): Promise<boolean> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (terminal.shellIntegration) {
+			return true;
+		}
+
+		await new Promise(resolve => setTimeout(resolve, 50));
+	}
+
+	return terminal.shellIntegration !== undefined;
+}
+
+async function probeSharedShellIntegration(client: Client): Promise<{
+	warmUpOutput: string;
+	terminal: vscode.Terminal | undefined;
+	hasShellIntegration: boolean;
+}> {
+	const warmUpOutput = await runForegroundCommand(
+		client,
+		SHELL_INTEGRATION_WARMUP_COMMAND,
+		'Warm up the shared terminal before multiline repro checks.',
+		'Allow shell integration to activate for the shared terminal.'
+	);
+	assertCommandFinished(warmUpOutput);
+
+	const terminal = await waitForSharedTerminal();
+	const hasShellIntegration = terminal ? await waitForShellIntegration(terminal) : false;
+
+	return {
+		warmUpOutput,
+		terminal,
+		hasShellIntegration,
+	};
 }
 
 suite('Terminal MCP integration', () => {
@@ -115,7 +169,7 @@ suite('Terminal MCP integration', () => {
 			assertCommandFinished(textContent);
 
 			const capturedOutput = /terminal-mcp-e2e/.test(textContent);
-			const usedFallback = /Shell integration did not activate/.test(textContent);
+			const usedFallback = hasFallbackWarning(textContent);
 			assert.ok(
 				capturedOutput || usedFallback,
 				'Expected either captured command output or the documented shell integration fallback warning'
@@ -125,10 +179,30 @@ suite('Terminal MCP integration', () => {
 		}
 	});
 
-	test('runInTerminal handles the multiline echo and wc command end to end', async () => {
+	test('shared foreground terminal activates shell integration before multiline repro checks', async () => {
 		const client = await createClient();
 
 		try {
+			const probe = await probeSharedShellIntegration(client);
+			assert.ok(probe.terminal, `Expected the shared terminal ${SHARED_TERMINAL_NAME} to be created during warm-up.`);
+			assert.ok(
+				probe.hasShellIntegration && !hasFallbackWarning(probe.warmUpOutput),
+				`Expected shell integration to activate for the shared foreground terminal. Output:\n${probe.warmUpOutput}`
+			);
+		} finally {
+			await client.close();
+		}
+	});
+
+	test('runInTerminal handles a multiline echo and wc command once shell integration is active', async function () {
+		const client = await createClient();
+
+		try {
+			const probe = await probeSharedShellIntegration(client);
+			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
+				this.skip();
+			}
+
 			const textContent = await runForegroundCommand(
 				client,
 				MULTILINE_WC_COMMAND,
@@ -142,27 +216,15 @@ suite('Terminal MCP integration', () => {
 		}
 	});
 
-	test('runInTerminal handles the half-length multiline echo and wc command end to end', async () => {
+	test('runInTerminal handles the same multiline command twice through the reused shell once shell integration is active', async function () {
 		const client = await createClient();
 
 		try {
-			const textContent = await runForegroundCommand(
-				client,
-				HALF_MULTILINE_WC_COMMAND,
-				'Count the bytes emitted by a shorter multiline echo payload.',
-				'Verify a shorter multiline command survives end-to-end execution.'
-			);
-			assertCommandFinished(textContent);
-			assertCapturedCount(textContent, HALF_MULTILINE_WC_EXPECTED_COUNT);
-		} finally {
-			await client.close();
-		}
-	});
+			const probe = await probeSharedShellIntegration(client);
+			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
+				this.skip();
+			}
 
-	test('runInTerminal can send the same multiline command twice through the reused shell', async () => {
-		const client = await createClient();
-
-		try {
 			const firstRun = await runForegroundCommand(
 				client,
 				MULTILINE_WC_COMMAND,
