@@ -231,4 +231,74 @@ suite('Terminal MCP integration', () => {
 			await client.close();
 		}
 	});
+
+	test('line-by-line with manual OSC 633 sequences gets shell integration tracking', async function () {
+		this.timeout(60000);
+		const client = await createClient();
+		try {
+			const terminal = await requireShellIntegration(client, this);
+
+			// OSC 633 escape sequences (ST = \x07 for BEL terminator)
+			const OSC_633_E = (cmd: string) => `\x1b]633;E;${cmd.replace(/\\/g, '\\\\').replace(/;/g, '\\x3b')}\x07`;
+			const OSC_633_C = '\x1b]633;C\x07';
+
+			// Listen for shell execution completion
+			let executionCompleted = false;
+			let exitCode: number | undefined;
+			const completionListener = vscode.window.onDidEndTerminalShellExecution(event => {
+				if (event.terminal === terminal) {
+					executionCompleted = true;
+					exitCode = event.exitCode;
+				}
+			});
+
+			// Capture output
+			let output = '';
+			const dataListener = vscode.window.onDidWriteTerminalData(e => {
+				if (e.terminal === terminal) output += e.data;
+			});
+
+			// Send pre-execution marker (skip E sequence — it contains the full command text which is large)
+			terminal.sendText(OSC_633_C, false);
+
+			// Send the command line by line
+			const lines = LARGE_MULTILINE_WC_COMMAND.split('\n');
+			for (let i = 0; i < lines.length; i++) {
+				if (i < lines.length - 1) {
+					terminal.sendText(lines[i], false);
+					terminal.sendText('\n', false);
+				} else {
+					terminal.sendText(lines[i], true);
+				}
+			}
+
+			// Wait for either completion event or byte count in output
+			const deadline = Date.now() + 30000;
+			let foundCount = false;
+			while (Date.now() < deadline) {
+				if (new RegExp(`(^|\\D)${LARGE_MULTILINE_WC_EXPECTED_COUNT}(\\D|$)`).test(output)) {
+					foundCount = true;
+				}
+				if (executionCompleted || foundCount) {
+					break;
+				}
+				await new Promise(r => setTimeout(r, 100));
+			}
+
+			// Wait a bit more for the completion event if we got the count
+			if (foundCount && !executionCompleted) {
+				await new Promise(r => setTimeout(r, 2000));
+			}
+
+			completionListener.dispose();
+			dataListener.dispose();
+
+			console.log(`OSC 633 test: output count found=${foundCount}, completion event=${executionCompleted}, exitCode=${exitCode}`);
+
+			assert.ok(foundCount, `Expected byte count ${LARGE_MULTILINE_WC_EXPECTED_COUNT} in output:\n${output.slice(-500)}`);
+			assert.ok(executionCompleted, 'Expected onDidEndTerminalShellExecution to fire');
+		} finally {
+			await client.close();
+		}
+	});
 });
