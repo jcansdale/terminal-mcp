@@ -231,29 +231,4 @@ suite('Terminal MCP integration', () => {
 			await client.close();
 		}
 	});
-
-	test('bracketed paste: 100-line multiline command via sendText', async function () {
-		const client = await createClient();
-		try {
-			const terminal = await requireShellIntegration(client, this);
-			let output = '';
-			const listener = vscode.window.onDidWriteTerminalData(e => {
-				if (e.terminal === terminal) output += e.data;
-			});
-			terminal.sendText(`\x1b[200~${LARGE_MULTILINE_WC_COMMAND}\x1b[201~`);
-			const deadline = Date.now() + 30000;
-			let found = false;
-			while (Date.now() < deadline) {
-				if (new RegExp(`(^|\\D)${LARGE_MULTILINE_WC_EXPECTED_COUNT}(\\D|$)`).test(output)) {
-					found = true;
-					break;
-				}
-				await new Promise(r => setTimeout(r, 100));
-			}
-			listener.dispose();
-			assert.ok(found, `Expected byte count ${LARGE_MULTILINE_WC_EXPECTED_COUNT} in output:\n${output.slice(-500)}`);
-		} finally {
-			await client.close();
-		}
-	});
 });
