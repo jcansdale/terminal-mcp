@@ -239,7 +239,6 @@ suite('Terminal MCP integration', () => {
 			const terminal = await requireShellIntegration(client, this);
 
 			// OSC 633 escape sequences (ST = \x07 for BEL terminator)
-			const OSC_633_E = (cmd: string) => `\x1b]633;E;${cmd.replace(/\\/g, '\\\\').replace(/;/g, '\\x3b')}\x07`;
 			const OSC_633_C = '\x1b]633;C\x07';
 
 			// Listen for shell execution completion
