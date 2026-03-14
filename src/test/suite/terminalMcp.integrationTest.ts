@@ -380,6 +380,71 @@ suite('Terminal MCP integration', () => {
 		}
 	});
 
+	test('bracketed paste mode stress test — increasing payload sizes', async function () {
+		this.timeout(120000);
+		const client = await createClient();
+
+		try {
+			const probe = await probeSharedShellIntegration(client);
+			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
+				this.skip();
+			}
+
+			const terminal = probe.terminal!;
+			const lineCounts = [100, 500, 1000, 2000, 5000];
+			const results: { lines: number; bytes: number; passed: boolean; timeMs: number }[] = [];
+
+			for (const lineCount of lineCounts) {
+				const lines = Array.from({ length: lineCount }, (_, i) =>
+					`L${String(i + 1).padStart(4, '0')} ${'x'.repeat(51)}`
+				);
+				const payload = lines.join('\n');
+				const command = `echo '${payload}' | wc -c`;
+				const expectedCount = String(Buffer.byteLength(`${payload}\n`, 'utf8'));
+				const totalBytes = Buffer.byteLength(command, 'utf8');
+
+				let output = '';
+				const dataListener = vscode.window.onDidWriteTerminalData(e => {
+					if (e.terminal === terminal) {
+						output += e.data;
+					}
+				});
+
+				const startTime = Date.now();
+				terminal.sendText(`\x1b[200~${command}\x1b[201~`);
+
+				const deadline = Date.now() + 30000;
+				let found = false;
+				while (Date.now() < deadline) {
+					if (new RegExp(`(^|\\D)${expectedCount}(\\D|$)`).test(output)) {
+						found = true;
+						break;
+					}
+					await new Promise(resolve => setTimeout(resolve, 100));
+				}
+				const elapsed = Date.now() - startTime;
+
+				dataListener.dispose();
+				results.push({ lines: lineCount, bytes: totalBytes, passed: found, timeMs: elapsed });
+
+				console.log(`Bracketed paste: ${lineCount} lines (${totalBytes} bytes) — ${found ? 'PASS' : 'FAIL'} in ${elapsed}ms`);
+
+				if (!found) {
+					break; // stop at first failure to avoid wasting time
+				}
+			}
+
+			const summary = results.map(r =>
+				`${r.lines} lines (${r.bytes} bytes): ${r.passed ? 'PASS' : 'FAIL'} (${r.timeMs}ms)`
+			).join('\n');
+
+			const allPassed = results.every(r => r.passed);
+			assert.ok(allPassed, `Bracketed paste stress test results:\n${summary}`);
+		} finally {
+			await client.close();
+		}
+	});
+
 	test.skip('runInTerminal activates shell integration with a custom Copilot Zsh terminal profile', async function () {
 		const client = await createClient();
 
