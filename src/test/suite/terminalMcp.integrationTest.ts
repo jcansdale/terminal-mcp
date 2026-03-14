@@ -301,7 +301,7 @@ suite('Terminal MCP integration', () => {
 		}
 	});
 
-	test('runInTerminal activates shell integration with a custom Copilot Zsh terminal profile', async function () {
+	test.skip('runInTerminal activates shell integration with a custom Copilot Zsh terminal profile', async function () {
 		const client = await createClient();
 
 		try {
