@@ -221,6 +221,40 @@ suite('Terminal MCP integration', () => {
 		}
 	});
 
+	test('runInTerminal handles the same single-line command twice through the reused shell once shell integration is active', async function () {
+		const client = await createClient();
+
+		try {
+			const probe = await probeSharedShellIntegration(client);
+			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
+				this.skip();
+			}
+
+			const singleLineCommand = 'echo single-line-reuse-test | wc -c';
+			const expectedCount = String(Buffer.byteLength('single-line-reuse-test\n', 'utf8'));
+
+			const firstRun = await runForegroundCommand(
+				client,
+				singleLineCommand,
+				'Count the bytes emitted by a single-line echo payload.',
+				'Verify the first single-line execution in the shared shell.'
+			);
+			assertCommandFinished(firstRun);
+			assertCapturedCount(firstRun, expectedCount);
+
+			const secondRun = await runForegroundCommand(
+				client,
+				singleLineCommand,
+				'Count the bytes emitted by a single-line echo payload.',
+				'Verify the second single-line execution in the reused shared shell.'
+			);
+			assertCommandFinished(secondRun);
+			assertCapturedCount(secondRun, expectedCount);
+		} finally {
+			await client.close();
+		}
+	});
+
 	test('runInTerminal handles the same multiline command twice through the reused shell once shell integration is active', async function () {
 		const client = await createClient();
 
