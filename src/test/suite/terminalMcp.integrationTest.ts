@@ -5,6 +5,14 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 const DEFAULT_TERMINAL_NAME = 'Terminal MCP';
 const CUSTOM_PROFILE_TERMINAL_NAME = 'Copilot Zsh';
+
+/**
+ * Returns the terminal names that the extension might use for the shared foreground terminal,
+ * depending on whether a custom chat terminal profile is configured.
+ */
+function getExpectedTerminalNames(): string[] {
+	return [DEFAULT_TERMINAL_NAME, CUSTOM_PROFILE_TERMINAL_NAME];
+}
 const SHELL_INTEGRATION_WARMUP_COMMAND = 'printf shell-integration-ready';
 
 const PAYLOAD_LINES = [
@@ -101,10 +109,11 @@ function assertCapturedCount(textContent: string, expectedCount: string): void {
 	}
 }
 
-async function waitForSharedTerminal(name: string, timeoutMs = 5000): Promise<vscode.Terminal | undefined> {
+async function waitForSharedTerminal(timeoutMs = 5000): Promise<vscode.Terminal | undefined> {
+	const names = getExpectedTerminalNames();
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
-		const terminal = vscode.window.terminals.find(candidate => candidate.name === name);
+		const terminal = vscode.window.terminals.find(candidate => names.includes(candidate.name));
 		if (terminal) {
 			return terminal;
 		}
@@ -112,7 +121,7 @@ async function waitForSharedTerminal(name: string, timeoutMs = 5000): Promise<vs
 		await new Promise(resolve => setTimeout(resolve, 50));
 	}
 
-	return vscode.window.terminals.find(candidate => candidate.name === name);
+	return vscode.window.terminals.find(candidate => names.includes(candidate.name));
 }
 
 async function waitForShellIntegration(terminal: vscode.Terminal, timeoutMs = 5000): Promise<boolean> {
@@ -128,7 +137,7 @@ async function waitForShellIntegration(terminal: vscode.Terminal, timeoutMs = 50
 	return terminal.shellIntegration !== undefined;
 }
 
-async function probeSharedShellIntegration(client: Client, terminalName: string): Promise<{
+async function probeSharedShellIntegration(client: Client): Promise<{
 	warmUpOutput: string;
 	terminal: vscode.Terminal | undefined;
 	hasShellIntegration: boolean;
@@ -141,7 +150,7 @@ async function probeSharedShellIntegration(client: Client, terminalName: string)
 	);
 	assertCommandFinished(warmUpOutput);
 
-	const terminal = await waitForSharedTerminal(terminalName);
+	const terminal = await waitForSharedTerminal();
 	const hasShellIntegration = terminal ? await waitForShellIntegration(terminal, 15000) : false;
 
 	return {
@@ -179,8 +188,8 @@ suite('Terminal MCP integration', () => {
 		const client = await createClient();
 
 		try {
-			const probe = await probeSharedShellIntegration(client, DEFAULT_TERMINAL_NAME);
-			assert.ok(probe.terminal, `Expected the shared terminal ${DEFAULT_TERMINAL_NAME} to be created during warm-up.`);
+			const probe = await probeSharedShellIntegration(client);
+			assert.ok(probe.terminal, `Expected a shared terminal (${getExpectedTerminalNames().join(' or ')}) to be created during warm-up.`);
 			assert.ok(
 				probe.hasShellIntegration && !hasFallbackWarning(probe.warmUpOutput),
 				`Expected shell integration to activate for the shared foreground terminal. Output:\n${probe.warmUpOutput}`
@@ -194,7 +203,7 @@ suite('Terminal MCP integration', () => {
 		const client = await createClient();
 
 		try {
-			const probe = await probeSharedShellIntegration(client, DEFAULT_TERMINAL_NAME);
+			const probe = await probeSharedShellIntegration(client);
 			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
 				this.skip();
 			}
@@ -216,7 +225,7 @@ suite('Terminal MCP integration', () => {
 		const client = await createClient();
 
 		try {
-			const probe = await probeSharedShellIntegration(client, DEFAULT_TERMINAL_NAME);
+			const probe = await probeSharedShellIntegration(client);
 			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
 				this.skip();
 			}
@@ -253,8 +262,8 @@ suite('Terminal MCP integration', () => {
 				icon: 'robot'
 			}, vscode.ConfigurationTarget.Workspace);
 
-			const probe = await probeSharedShellIntegration(client, CUSTOM_PROFILE_TERMINAL_NAME);
-			assert.ok(probe.terminal, `Expected the shared terminal ${CUSTOM_PROFILE_TERMINAL_NAME} to be created during warm-up.`);
+			const probe = await probeSharedShellIntegration(client);
+			assert.ok(probe.terminal, `Expected a terminal named ${CUSTOM_PROFILE_TERMINAL_NAME} to be created during warm-up. Found: ${vscode.window.terminals.map(t => t.name).join(', ')}`);
 			assert.ok(
 				probe.hasShellIntegration && !hasFallbackWarning(probe.warmUpOutput),
 				`Expected shell integration to activate for the custom profile terminal. Output:\n${probe.warmUpOutput}`
