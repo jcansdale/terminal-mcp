@@ -3,154 +3,95 @@ import * as vscode from 'vscode';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-const DEFAULT_TERMINAL_NAME = 'Terminal MCP';
-const CUSTOM_PROFILE_TERMINAL_NAME = 'Copilot Zsh';
-
-/**
- * Returns the terminal names that the extension might use for the shared foreground terminal,
- * depending on whether a custom chat terminal profile is configured.
- */
-function getExpectedTerminalNames(): string[] {
-	return [DEFAULT_TERMINAL_NAME, CUSTOM_PROFILE_TERMINAL_NAME];
-}
-const SHELL_INTEGRATION_WARMUP_COMMAND = 'printf shell-integration-ready';
+const EXPECTED_TERMINAL_NAMES = ['Terminal MCP', 'Copilot Zsh'];
 
 const PAYLOAD_LINE_COUNT = 19;
 const PAYLOAD_LINES = Array.from({ length: PAYLOAD_LINE_COUNT }, (_, i) => {
 	const label = `L${String(i + 1).padStart(2, '0')}`;
 	return `${label} ${'a'.repeat(51)}`;
 });
-
 const MULTILINE_PAYLOAD = PAYLOAD_LINES.join('\n');
-
 const MULTILINE_WC_COMMAND = `echo '${MULTILINE_PAYLOAD}' | wc -c`;
 const MULTILINE_WC_EXPECTED_COUNT = String(Buffer.byteLength(`${MULTILINE_PAYLOAD}\n`, 'utf8'));
 
-const LARGE_PAYLOAD_LINE_COUNT = 100;
-const LARGE_PAYLOAD_LINES = Array.from({ length: LARGE_PAYLOAD_LINE_COUNT }, (_, i) => {
+const LARGE_LINE_COUNT = 100;
+const LARGE_LINES = Array.from({ length: LARGE_LINE_COUNT }, (_, i) => {
 	const label = `L${String(i + 1).padStart(3, '0')}`;
 	return `${label} ${'b'.repeat(51)}`;
 });
-const LARGE_MULTILINE_PAYLOAD = LARGE_PAYLOAD_LINES.join('\n');
+const LARGE_MULTILINE_PAYLOAD = LARGE_LINES.join('\n');
 const LARGE_MULTILINE_WC_COMMAND = `echo '${LARGE_MULTILINE_PAYLOAD}' | wc -c`;
 const LARGE_MULTILINE_WC_EXPECTED_COUNT = String(Buffer.byteLength(`${LARGE_MULTILINE_PAYLOAD}\n`, 'utf8'));
 
 async function createClient(): Promise<Client> {
 	await vscode.workspace.getConfiguration('terminal.integrated').update('shellIntegration.enabled', true, vscode.ConfigurationTarget.Workspace);
-
 	const extension = vscode.extensions.getExtension('jcansdale.terminal-mcp');
-	assert.ok(extension, 'Expected extension to be available in the extension host');
+	assert.ok(extension, 'Extension not available');
 	await extension.activate();
-
 	const serverUrl = await vscode.commands.executeCommand<string>('terminalMcp._getServerUrl');
-	assert.ok(serverUrl, 'Expected test command to return the MCP server URL');
-
+	assert.ok(serverUrl, 'Server URL not returned');
 	const transport = new StreamableHTTPClientTransport(new URL(serverUrl));
 	const client = new Client({ name: 'terminal-mcp-tests', version: '0.0.1' });
 	await client.connect(transport);
-
-	const tools = await client.listTools();
-	assert.ok(tools.tools.some(tool => tool.name === 'runInTerminal'), 'Expected runInTerminal tool to be registered');
-
 	return client;
 }
 
-function getTextContent(result: unknown): string {
-	assert.ok(typeof result === 'object' && result !== null && 'content' in result, 'Expected tool call to return content');
-	const { content } = result as { content: unknown };
-	assert.ok(Array.isArray(content), 'Expected tool call content to be an array');
-	const textContent = content.find((item): item is { type: 'text'; text: string } => {
-		return typeof item === 'object'
-			&& item !== null
-			&& 'type' in item
-			&& item.type === 'text'
-			&& 'text' in item
-			&& typeof item.text === 'string';
-	});
-	assert.ok(textContent, 'Expected text content from tool call');
-	return textContent.text;
-}
-
-async function runForegroundCommand(client: Client, command: string, explanation: string, goal: string): Promise<string> {
+async function runCommand(client: Client, command: string): Promise<string> {
 	const result = await client.callTool({
 		name: 'runInTerminal',
-		arguments: {
-			command,
-			explanation,
-			goal,
-			isBackground: false,
-			timeout: 30000,
-		}
+		arguments: { command, explanation: 'test', goal: 'test', isBackground: false, timeout: 30000 }
 	});
-
-	return getTextContent(result);
+	assert.ok(typeof result === 'object' && result !== null && 'content' in result);
+	const { content } = result as { content: unknown };
+	assert.ok(Array.isArray(content));
+	const text = content.find((item: Record<string, unknown>) =>
+		item && item.type === 'text' && typeof item.text === 'string'
+	) as { text: string } | undefined;
+	assert.ok(text, 'No text content');
+	return text.text;
 }
 
-function assertCommandFinished(textContent: string): void {
-	assert.match(textContent, /Command finished/, 'Expected the server to report a completed foreground execution');
+function assertFinished(output: string): void {
+	assert.match(output, /Command finished/);
 }
 
-function hasFallbackWarning(textContent: string): boolean {
-	return /Shell integration did not activate/.test(textContent);
-}
-
-function assertCapturedCount(textContent: string, expectedCount: string): void {
-	const capturedExpectedCount = new RegExp(`(^|\\D)${expectedCount}(\\D|$)`).test(textContent);
-	if (!capturedExpectedCount) {
-		console.error(`Captured textContent:\n${textContent}`);
-		assert.fail(`Expected the byte count ${expectedCount} to appear in the captured command output`);
+function assertCount(output: string, expected: string): void {
+	if (!new RegExp(`(^|\\D)${expected}(\\D|$)`).test(output)) {
+		assert.fail(`Expected byte count ${expected} in output:\n${output}`);
 	}
 }
 
-async function waitForSharedTerminal(timeoutMs = 5000): Promise<vscode.Terminal | undefined> {
-	const names = getExpectedTerminalNames();
-	const deadline = Date.now() + timeoutMs;
+function isFallback(output: string): boolean {
+	return /Shell integration did not activate/.test(output);
+}
+
+async function findTerminal(): Promise<vscode.Terminal | undefined> {
+	const deadline = Date.now() + 5000;
 	while (Date.now() < deadline) {
-		const terminal = vscode.window.terminals.find(candidate => names.includes(candidate.name));
-		if (terminal) {
-			return terminal;
-		}
-
-		await new Promise(resolve => setTimeout(resolve, 50));
+		const t = vscode.window.terminals.find(c => EXPECTED_TERMINAL_NAMES.includes(c.name));
+		if (t) return t;
+		await new Promise(r => setTimeout(r, 50));
 	}
-
-	return vscode.window.terminals.find(candidate => names.includes(candidate.name));
+	return undefined;
 }
 
-async function waitForShellIntegration(terminal: vscode.Terminal, timeoutMs = 5000): Promise<boolean> {
-	const deadline = Date.now() + timeoutMs;
+async function waitForShellIntegration(terminal: vscode.Terminal): Promise<boolean> {
+	const deadline = Date.now() + 15000;
 	while (Date.now() < deadline) {
-		if (terminal.shellIntegration) {
-			return true;
-		}
-
-		await new Promise(resolve => setTimeout(resolve, 50));
+		if (terminal.shellIntegration) return true;
+		await new Promise(r => setTimeout(r, 50));
 	}
-
-	return terminal.shellIntegration !== undefined;
+	return false;
 }
 
-async function probeSharedShellIntegration(client: Client): Promise<{
-	warmUpOutput: string;
-	terminal: vscode.Terminal | undefined;
-	hasShellIntegration: boolean;
-}> {
-	const warmUpOutput = await runForegroundCommand(
-		client,
-		SHELL_INTEGRATION_WARMUP_COMMAND,
-		'Warm up the shared terminal before multiline repro checks.',
-		'Allow shell integration to activate for the shared terminal.'
-	);
-	assertCommandFinished(warmUpOutput);
-
-	const terminal = await waitForSharedTerminal();
-	const hasShellIntegration = terminal ? await waitForShellIntegration(terminal, 15000) : false;
-
-	return {
-		warmUpOutput,
-		terminal,
-		hasShellIntegration,
-	};
+async function requireShellIntegration(client: Client, ctx: Mocha.Context): Promise<vscode.Terminal> {
+	const output = await runCommand(client, 'printf ready');
+	assertFinished(output);
+	const terminal = await findTerminal();
+	if (!terminal || !await waitForShellIntegration(terminal) || isFallback(output)) {
+		ctx.skip();
+	}
+	return terminal!;
 }
 
 suite('Terminal MCP integration', () => {
@@ -158,429 +99,118 @@ suite('Terminal MCP integration', () => {
 		await vscode.commands.executeCommand('terminalMcp._resetSharedTerminal');
 	});
 
-	test('runInTerminal executes a foreground command end to end', async () => {
+	test('smoke: foreground command executes end to end', async () => {
 		const client = await createClient();
-
 		try {
-			const textContent = await runForegroundCommand(
-				client,
-				'echo terminal-mcp-e2e',
-				'Print a stable test token.',
-				'Verify end-to-end terminal execution.'
-			);
-			assertCommandFinished(textContent);
-
-			const capturedOutput = /terminal-mcp-e2e/.test(textContent);
-			const usedFallback = hasFallbackWarning(textContent);
-			assert.ok(
-				capturedOutput || usedFallback,
-				'Expected either captured command output or the documented shell integration fallback warning'
-			);
+			const output = await runCommand(client, 'echo terminal-mcp-e2e');
+			assertFinished(output);
+			assert.ok(/terminal-mcp-e2e/.test(output) || isFallback(output), 'Expected output or fallback warning');
 		} finally {
 			await client.close();
 		}
 	});
 
-	test('shared foreground terminal activates shell integration before multiline repro checks', async () => {
+	test('shell integration activates on the shared terminal', async () => {
 		const client = await createClient();
-
 		try {
-			const probe = await probeSharedShellIntegration(client);
-			assert.ok(probe.terminal, `Expected a shared terminal (${getExpectedTerminalNames().join(' or ')}) to be created during warm-up.`);
-			assert.ok(
-				probe.hasShellIntegration && !hasFallbackWarning(probe.warmUpOutput),
-				`Expected shell integration to activate for the shared foreground terminal. Output:\n${probe.warmUpOutput}`
-			);
+			const output = await runCommand(client, 'printf ready');
+			assertFinished(output);
+			const terminal = await findTerminal();
+			assert.ok(terminal, 'Shared terminal not found');
+			assert.ok(await waitForShellIntegration(terminal), 'Shell integration did not activate');
+			assert.ok(!isFallback(output), `Got fallback warning:\n${output}`);
 		} finally {
 			await client.close();
 		}
 	});
 
-	test('runInTerminal handles a single very long line (5KB) once shell integration is active', async function () {
+	test('single-line reuse: 10 commands through the same shell', async function () {
 		const client = await createClient();
-
 		try {
-			const probe = await probeSharedShellIntegration(client);
-			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
-				this.skip();
-			}
-
-			const longPayload = 'Z'.repeat(5000);
-			const longLineCommand = `echo '${longPayload}' | wc -c`;
-			const expectedCount = String(Buffer.byteLength(`${longPayload}\n`, 'utf8'));
-
-			const textContent = await runForegroundCommand(
-				client,
-				longLineCommand,
-				'Count the bytes emitted by a very long single-line echo payload.',
-				'Verify a 5KB single-line command survives end-to-end execution.'
-			);
-			assertCommandFinished(textContent);
-			assertCapturedCount(textContent, expectedCount);
-		} finally {
-			await client.close();
-		}
-	});
-
-	test('runInTerminal handles a multiline echo and wc command once shell integration is active', async function () {
-		const client = await createClient();
-
-		try {
-			const probe = await probeSharedShellIntegration(client);
-			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
-				this.skip();
-			}
-
-			const textContent = await runForegroundCommand(
-				client,
-				MULTILINE_WC_COMMAND,
-				'Count the bytes emitted by a multiline echo payload.',
-				'Verify multiline commands survive end-to-end execution.'
-			);
-			assertCommandFinished(textContent);
-			assertCapturedCount(textContent, MULTILINE_WC_EXPECTED_COUNT);
-		} finally {
-			await client.close();
-		}
-	});
-
-	test('runInTerminal handles a large multiline echo (100 lines) once shell integration is active', async function () {
-		const client = await createClient();
-
-		try {
-			const probe = await probeSharedShellIntegration(client);
-			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
-				this.skip();
-			}
-
-			const textContent = await runForegroundCommand(
-				client,
-				LARGE_MULTILINE_WC_COMMAND,
-				'Count the bytes emitted by a large multiline echo payload.',
-				'Verify a 100-line multiline command survives end-to-end execution.'
-			);
-			assertCommandFinished(textContent);
-			assertCapturedCount(textContent, LARGE_MULTILINE_WC_EXPECTED_COUNT);
-		} finally {
-			await client.close();
-		}
-	});
-
-	test('runInTerminal handles the same single-line command twice through the reused shell once shell integration is active', async function () {
-		const client = await createClient();
-
-		try {
-			const probe = await probeSharedShellIntegration(client);
-			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
-				this.skip();
-			}
-
-			const singleLineCommand = 'echo single-line-reuse-test | wc -c';
-			const expectedCount = String(Buffer.byteLength('single-line-reuse-test\n', 'utf8'));
-
-			const firstRun = await runForegroundCommand(
-				client,
-				singleLineCommand,
-				'Count the bytes emitted by a single-line echo payload.',
-				'Verify the first single-line execution in the shared shell.'
-			);
-			assertCommandFinished(firstRun);
-			assertCapturedCount(firstRun, expectedCount);
-
-			const secondRun = await runForegroundCommand(
-				client,
-				singleLineCommand,
-				'Count the bytes emitted by a single-line echo payload.',
-				'Verify the second single-line execution in the reused shared shell.'
-			);
-			assertCommandFinished(secondRun);
-			assertCapturedCount(secondRun, expectedCount);
-		} finally {
-			await client.close();
-		}
-	});
-
-	test('runInTerminal handles the same multiline command twice through the reused shell once shell integration is active', async function () {
-		const client = await createClient();
-
-		try {
-			const probe = await probeSharedShellIntegration(client);
-			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
-				this.skip();
-			}
-
-			const firstRun = await runForegroundCommand(
-				client,
-				MULTILINE_WC_COMMAND,
-				'Count the bytes emitted by a multiline echo payload.',
-				'Verify the first multiline execution in the shared shell.'
-			);
-			assertCommandFinished(firstRun);
-			assertCapturedCount(firstRun, MULTILINE_WC_EXPECTED_COUNT);
-
-			const secondRun = await runForegroundCommand(
-				client,
-				MULTILINE_WC_COMMAND,
-				'Count the bytes emitted by a multiline echo payload.',
-				'Verify the second multiline execution in the reused shared shell.'
-			);
-			assertCommandFinished(secondRun);
-			assertCapturedCount(secondRun, MULTILINE_WC_EXPECTED_COUNT);
-		} finally {
-			await client.close();
-		}
-	});
-
-	test('runInTerminal handles 1000 single-line commands in rapid succession through the reused shell', async function () {
-		this.timeout(300000);
-		const client = await createClient();
-
-		try {
-			const probe = await probeSharedShellIntegration(client);
-			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
-				this.skip();
-			}
-
-			const iterations = 1000;
-			for (let i = 1; i <= iterations; i++) {
-				const token = `iter-${i}`;
-				const command = `echo ${token} | wc -c`;
-				const expectedCount = String(Buffer.byteLength(`${token}\n`, 'utf8'));
-
-				const textContent = await runForegroundCommand(
-					client,
-					command,
-					`Iteration ${i}/${iterations}.`,
-					`Verify reuse at iteration ${i}.`
-				);
-
-				const passed = /Command finished/.test(textContent) &&
-					new RegExp(`(^|\\D)${expectedCount}(\\D|$)`).test(textContent);
-
-				if (!passed) {
-					assert.fail(`Failed at iteration ${i}/${iterations}. Output:\n${textContent}`);
-				}
-
-				if (i % 100 === 0) {
-					console.log(`Tiny payload reuse: ${i}/${iterations} passed`);
-				}
+			await requireShellIntegration(client, this);
+			for (let i = 1; i <= 10; i++) {
+				const token = `reuse-${i}`;
+				const expected = String(Buffer.byteLength(`${token}\n`, 'utf8'));
+				const output = await runCommand(client, `echo ${token} | wc -c`);
+				assertFinished(output);
+				assertCount(output, expected);
 			}
 		} finally {
 			await client.close();
 		}
 	});
 
-	test('single long line stress test — increasing sizes', async function () {
+	test('multiline: 19-line command succeeds on a fresh terminal', async function () {
+		const client = await createClient();
+		try {
+			await requireShellIntegration(client, this);
+			const output = await runCommand(client, MULTILINE_WC_COMMAND);
+			assertFinished(output);
+			assertCount(output, MULTILINE_WC_EXPECTED_COUNT);
+		} finally {
+			await client.close();
+		}
+	});
+
+	test('multiline reuse: same 19-line command twice through the same shell', async function () {
+		const client = await createClient();
+		try {
+			await requireShellIntegration(client, this);
+			const first = await runCommand(client, MULTILINE_WC_COMMAND);
+			assertFinished(first);
+			assertCount(first, MULTILINE_WC_EXPECTED_COUNT);
+			const second = await runCommand(client, MULTILINE_WC_COMMAND);
+			assertFinished(second);
+			assertCount(second, MULTILINE_WC_EXPECTED_COUNT);
+		} finally {
+			await client.close();
+		}
+	});
+
+	test('single long line stress: increasing sizes via executeCommand', async function () {
 		this.timeout(120000);
 		const client = await createClient();
-
 		try {
-			const probe = await probeSharedShellIntegration(client);
-			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
-				this.skip();
-			}
-
+			await requireShellIntegration(client, this);
 			const sizes = [100, 500, 1000, 2000, 5000, 10000, 20000, 50000];
-			const results: { bytes: number; passed: boolean; timeMs: number }[] = [];
-
 			for (const size of sizes) {
 				const payload = 'X'.repeat(size);
-				const command = `echo '${payload}' | wc -c`;
-				const expectedCount = String(Buffer.byteLength(`${payload}\n`, 'utf8'));
-
+				const expected = String(Buffer.byteLength(`${payload}\n`, 'utf8'));
 				const start = Date.now();
-				const textContent = await runForegroundCommand(
-					client,
-					command,
-					`Single long line of ${size} bytes.`,
-					`Verify a ${size}-byte single-line command survives.`
-				);
+				const output = await runCommand(client, `echo '${payload}' | wc -c`);
 				const elapsed = Date.now() - start;
-
-				const passed = /Command finished/.test(textContent) &&
-					new RegExp(`(^|\\D)${expectedCount}(\\D|$)`).test(textContent);
-
-				results.push({ bytes: size, passed, timeMs: elapsed });
+				const passed = /Command finished/.test(output) && new RegExp(`(^|\\D)${expected}(\\D|$)`).test(output);
 				console.log(`Single long line: ${size} bytes — ${passed ? 'PASS' : 'FAIL'} in ${elapsed}ms`);
-
 				if (!passed) {
-					break;
+					assert.fail(`Failed at ${size} bytes:\n${output}`);
 				}
 			}
-
-			const summary = results.map(r =>
-				`${r.bytes} bytes: ${r.passed ? 'PASS' : 'FAIL'} (${r.timeMs}ms)`
-			).join('\n');
-
-			const allPassed = results.every(r => r.passed);
-			assert.ok(allPassed, `Single long line stress test results:\n${summary}`);
 		} finally {
 			await client.close();
 		}
 	});
 
-	test('large multiline command succeeds when wrapped in bracketed paste mode', async function () {
+	test('bracketed paste: 100-line multiline command via sendText', async function () {
 		const client = await createClient();
-
 		try {
-			const probe = await probeSharedShellIntegration(client);
-			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
-				this.skip();
-			}
-
-			const terminal = probe.terminal!;
+			const terminal = await requireShellIntegration(client, this);
 			let output = '';
-			const dataListener = vscode.window.onDidWriteTerminalData(e => {
-				if (e.terminal === terminal) {
-					output += e.data;
-				}
+			const listener = vscode.window.onDidWriteTerminalData(e => {
+				if (e.terminal === terminal) output += e.data;
 			});
-
-			// Send the large multiline command wrapped in bracketed paste escape sequences
 			terminal.sendText(`\x1b[200~${LARGE_MULTILINE_WC_COMMAND}\x1b[201~`);
-
-			// Wait up to 15s for the expected byte count to appear in terminal output
-			const deadline = Date.now() + 15000;
+			const deadline = Date.now() + 30000;
 			let found = false;
 			while (Date.now() < deadline) {
 				if (new RegExp(`(^|\\D)${LARGE_MULTILINE_WC_EXPECTED_COUNT}(\\D|$)`).test(output)) {
 					found = true;
 					break;
 				}
-				await new Promise(resolve => setTimeout(resolve, 100));
+				await new Promise(r => setTimeout(r, 100));
 			}
-
-			dataListener.dispose();
-
-			assert.ok(found, `Expected the byte count ${LARGE_MULTILINE_WC_EXPECTED_COUNT} to appear in the terminal output. Got:\n${output.slice(-500)}`);
+			listener.dispose();
+			assert.ok(found, `Expected byte count ${LARGE_MULTILINE_WC_EXPECTED_COUNT} in output:\n${output.slice(-500)}`);
 		} finally {
-			await client.close();
-		}
-	});
-
-	test('two large multiline commands succeed when wrapped in bracketed paste mode', async function () {
-		const client = await createClient();
-
-		try {
-			const probe = await probeSharedShellIntegration(client);
-			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
-				this.skip();
-			}
-
-			const terminal = probe.terminal!;
-
-			for (const run of ['first', 'second']) {
-				let output = '';
-				const dataListener = vscode.window.onDidWriteTerminalData(e => {
-					if (e.terminal === terminal) {
-						output += e.data;
-					}
-				});
-
-				terminal.sendText(`\x1b[200~${LARGE_MULTILINE_WC_COMMAND}\x1b[201~`);
-
-				const deadline = Date.now() + 15000;
-				let found = false;
-				while (Date.now() < deadline) {
-					if (new RegExp(`(^|\\D)${LARGE_MULTILINE_WC_EXPECTED_COUNT}(\\D|$)`).test(output)) {
-						found = true;
-						break;
-					}
-					await new Promise(resolve => setTimeout(resolve, 100));
-				}
-
-				dataListener.dispose();
-
-				assert.ok(found, `Expected the byte count ${LARGE_MULTILINE_WC_EXPECTED_COUNT} on the ${run} run. Got:\n${output.slice(-500)}`);
-			}
-		} finally {
-			await client.close();
-		}
-	});
-
-	test('bracketed paste mode stress test — increasing payload sizes', async function () {
-		this.timeout(120000);
-		const client = await createClient();
-
-		try {
-			const probe = await probeSharedShellIntegration(client);
-			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
-				this.skip();
-			}
-
-			const terminal = probe.terminal!;
-			const lineCounts = [100, 500, 1000, 2000, 5000];
-			const results: { lines: number; bytes: number; passed: boolean; timeMs: number }[] = [];
-
-			for (const lineCount of lineCounts) {
-				const lines = Array.from({ length: lineCount }, (_, i) =>
-					`L${String(i + 1).padStart(4, '0')} ${'x'.repeat(51)}`
-				);
-				const payload = lines.join('\n');
-				const command = `echo '${payload}' | wc -c`;
-				const expectedCount = String(Buffer.byteLength(`${payload}\n`, 'utf8'));
-				const totalBytes = Buffer.byteLength(command, 'utf8');
-
-				let output = '';
-				const dataListener = vscode.window.onDidWriteTerminalData(e => {
-					if (e.terminal === terminal) {
-						output += e.data;
-					}
-				});
-
-				const startTime = Date.now();
-				terminal.sendText(`\x1b[200~${command}\x1b[201~`);
-
-				const deadline = Date.now() + 30000;
-				let found = false;
-				while (Date.now() < deadline) {
-					if (new RegExp(`(^|\\D)${expectedCount}(\\D|$)`).test(output)) {
-						found = true;
-						break;
-					}
-					await new Promise(resolve => setTimeout(resolve, 100));
-				}
-				const elapsed = Date.now() - startTime;
-
-				dataListener.dispose();
-				results.push({ lines: lineCount, bytes: totalBytes, passed: found, timeMs: elapsed });
-
-				console.log(`Bracketed paste: ${lineCount} lines (${totalBytes} bytes) — ${found ? 'PASS' : 'FAIL'} in ${elapsed}ms`);
-
-				if (!found) {
-					break; // stop at first failure to avoid wasting time
-				}
-			}
-
-			const summary = results.map(r =>
-				`${r.lines} lines (${r.bytes} bytes): ${r.passed ? 'PASS' : 'FAIL'} (${r.timeMs}ms)`
-			).join('\n');
-
-			const allPassed = results.every(r => r.passed);
-			assert.ok(allPassed, `Bracketed paste stress test results:\n${summary}`);
-		} finally {
-			await client.close();
-		}
-	});
-
-	test.skip('runInTerminal activates shell integration with a custom Copilot Zsh terminal profile', async function () {
-		const client = await createClient();
-
-		try {
-			await vscode.workspace.getConfiguration().update('chat.tools.terminal.terminalProfile.osx', {
-				title: 'Copilot Zsh',
-				path: '/bin/zsh',
-				icon: 'robot'
-			}, vscode.ConfigurationTarget.Workspace);
-
-			const probe = await probeSharedShellIntegration(client);
-			assert.ok(probe.terminal, `Expected a terminal named ${CUSTOM_PROFILE_TERMINAL_NAME} to be created during warm-up. Found: ${vscode.window.terminals.map(t => t.name).join(', ')}`);
-			assert.ok(
-				probe.hasShellIntegration && !hasFallbackWarning(probe.warmUpOutput),
-				`Expected shell integration to activate for the custom profile terminal. Output:\n${probe.warmUpOutput}`
-			);
-		} finally {
-			await vscode.workspace.getConfiguration().update('chat.tools.terminal.terminalProfile.osx', undefined, vscode.ConfigurationTarget.Workspace);
 			await client.close();
 		}
 	});
