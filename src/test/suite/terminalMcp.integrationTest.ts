@@ -26,6 +26,15 @@ const MULTILINE_PAYLOAD = PAYLOAD_LINES.join('\n');
 const MULTILINE_WC_COMMAND = `echo '${MULTILINE_PAYLOAD}' | wc -c`;
 const MULTILINE_WC_EXPECTED_COUNT = String(Buffer.byteLength(`${MULTILINE_PAYLOAD}\n`, 'utf8'));
 
+const LARGE_PAYLOAD_LINE_COUNT = 100;
+const LARGE_PAYLOAD_LINES = Array.from({ length: LARGE_PAYLOAD_LINE_COUNT }, (_, i) => {
+	const label = `L${String(i + 1).padStart(3, '0')}`;
+	return `${label} ${'b'.repeat(51)}`;
+});
+const LARGE_MULTILINE_PAYLOAD = LARGE_PAYLOAD_LINES.join('\n');
+const LARGE_MULTILINE_WC_COMMAND = `echo '${LARGE_MULTILINE_PAYLOAD}' | wc -c`;
+const LARGE_MULTILINE_WC_EXPECTED_COUNT = String(Buffer.byteLength(`${LARGE_MULTILINE_PAYLOAD}\n`, 'utf8'));
+
 async function createClient(): Promise<Client> {
 	await vscode.workspace.getConfiguration('terminal.integrated').update('shellIntegration.enabled', true, vscode.ConfigurationTarget.Workspace);
 
@@ -200,6 +209,28 @@ suite('Terminal MCP integration', () => {
 			);
 			assertCommandFinished(textContent);
 			assertCapturedCount(textContent, MULTILINE_WC_EXPECTED_COUNT);
+		} finally {
+			await client.close();
+		}
+	});
+
+	test('runInTerminal handles a large multiline echo (100 lines) once shell integration is active', async function () {
+		const client = await createClient();
+
+		try {
+			const probe = await probeSharedShellIntegration(client);
+			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
+				this.skip();
+			}
+
+			const textContent = await runForegroundCommand(
+				client,
+				LARGE_MULTILINE_WC_COMMAND,
+				'Count the bytes emitted by a large multiline echo payload.',
+				'Verify a 100-line multiline command survives end-to-end execution.'
+			);
+			assertCommandFinished(textContent);
+			assertCapturedCount(textContent, LARGE_MULTILINE_WC_EXPECTED_COUNT);
 		} finally {
 			await client.close();
 		}
