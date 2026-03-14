@@ -301,6 +301,45 @@ suite('Terminal MCP integration', () => {
 		}
 	});
 
+	test('large multiline command succeeds when wrapped in bracketed paste mode', async function () {
+		const client = await createClient();
+
+		try {
+			const probe = await probeSharedShellIntegration(client);
+			if (!probe.terminal || !probe.hasShellIntegration || hasFallbackWarning(probe.warmUpOutput)) {
+				this.skip();
+			}
+
+			const terminal = probe.terminal!;
+			let output = '';
+			const dataListener = vscode.window.onDidWriteTerminalData(e => {
+				if (e.terminal === terminal) {
+					output += e.data;
+				}
+			});
+
+			// Send the large multiline command wrapped in bracketed paste escape sequences
+			terminal.sendText(`\x1b[200~${LARGE_MULTILINE_WC_COMMAND}\x1b[201~`);
+
+			// Wait up to 15s for the expected byte count to appear in terminal output
+			const deadline = Date.now() + 15000;
+			let found = false;
+			while (Date.now() < deadline) {
+				if (new RegExp(`(^|\\D)${LARGE_MULTILINE_WC_EXPECTED_COUNT}(\\D|$)`).test(output)) {
+					found = true;
+					break;
+				}
+				await new Promise(resolve => setTimeout(resolve, 100));
+			}
+
+			dataListener.dispose();
+
+			assert.ok(found, `Expected the byte count ${LARGE_MULTILINE_WC_EXPECTED_COUNT} to appear in the terminal output. Got:\n${output.slice(-500)}`);
+		} finally {
+			await client.close();
+		}
+	});
+
 	test.skip('runInTerminal activates shell integration with a custom Copilot Zsh terminal profile', async function () {
 		const client = await createClient();
 
