@@ -154,6 +154,10 @@ async function probeSharedShellIntegration(client: Client): Promise<{
 }
 
 suite('Terminal MCP integration', () => {
+	setup(async () => {
+		await vscode.commands.executeCommand('terminalMcp._resetSharedTerminal');
+	});
+
 	test('runInTerminal executes a foreground command end to end', async () => {
 		const client = await createClient();
 

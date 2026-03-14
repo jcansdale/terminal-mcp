@@ -105,6 +105,11 @@ export class TerminalSessionManager implements vscode.Disposable {
 		vscode.Disposable.from(...this._disposables).dispose();
 	}
 
+	public resetSharedTerminal(): void {
+		this._sharedTerminal?.dispose();
+		this._sharedTerminal = undefined;
+	}
+
 	public async runInTerminal(params: RunInTerminalParams): Promise<RunInTerminalResult> {
 		const terminal = params.isBackground ? this._createBackgroundTerminal(params.goal) : this._getOrCreateSharedTerminal();
 		const execution = this._createExecutionRecord(terminal, params);

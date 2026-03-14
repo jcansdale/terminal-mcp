@@ -50,12 +50,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		}
 	});
 
+	const resetSharedTerminal = vscode.commands.registerCommand('terminalMcp._resetSharedTerminal', () => {
+		terminalManager.resetSharedTerminal();
+	});
+
 	context.subscriptions.push(
 		terminalManager,
 		showServerUrl,
 		getServerUrl,
 		restartServer,
 		showShellIntegrationStatus,
+		resetSharedTerminal,
 		provider,
 		new vscode.Disposable(() => {
 			void mcpServer.stop();
