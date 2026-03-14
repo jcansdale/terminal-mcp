@@ -79,7 +79,7 @@ async function runForegroundCommand(client: Client, command: string, explanation
 			explanation,
 			goal,
 			isBackground: false,
-			timeout: 15000,
+			timeout: 30000,
 		}
 	});
 
