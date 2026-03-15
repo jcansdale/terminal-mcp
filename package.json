@@ -34,6 +34,16 @@
 	],
 	"main": "./dist/extension.js",
 	"contributes": {
+		"configuration": {
+			"title": "Terminal MCP",
+			"properties": {
+				"terminal-mcp.multilineWorkaround": {
+					"type": "boolean",
+					"default": true,
+					"description": "Use the sendText workaround for multiline commands to avoid PTY corruption. When disabled, multiline commands use executeCommand like single-line commands."
+				}
+			}
+		},
 		"commands": [
 			{
 				"command": "terminalMcp.showShellIntegrationStatus",

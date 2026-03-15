@@ -172,7 +172,8 @@ export class TerminalSessionManager implements vscode.Disposable {
 			};
 		}
 
-		const isMultiline = params.command.includes('\n');
+		const useMultilineWorkaround = vscode.workspace.getConfiguration('terminal-mcp').get<boolean>('multilineWorkaround', true);
+		const isMultiline = useMultilineWorkaround && params.command.includes('\n');
 
 		if (isMultiline) {
 			// Multiline commands: executeCommand() writes the entire command in one

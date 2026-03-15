@@ -29,6 +29,15 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Package VSIX
+        run: npx @vscode/vsce package --no-dependencies
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terminal-mcp-vsix
+          path: "*.vsix"
+
   test:
     runs-on: macos-latest
 

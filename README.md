@@ -11,6 +11,22 @@ This project registers terminal-oriented language model tools directly from the 
 - `package.json` remains marked `private` to avoid accidental npm publication.
 - Uses direct `vscode.lm.registerTool(...)` registration instead of `mcpServerDefinitionProviders`.
 
+## Installation
+
+1. Download the latest `.vsix` file from the [CI workflow artifacts](https://github.com/jcansdale/terminal-mcp/actions/workflows/ci.yml) (click the most recent successful run, then download `terminal-mcp-vsix`).
+
+2. Install the extension in VS Code Insiders:
+   ```bash
+   code-insiders --install-extension terminal-mcp-*.vsix
+   ```
+
+3. Launch VS Code Insiders with the proposed API enabled:
+   ```bash
+   code-insiders --enable-proposed-api=jcansdale.terminal-mcp
+   ```
+
+   You'll need to include this flag every time you launch VS Code, or create a shell alias.
+
 ## What it exposes
 
 - `runInTerminal`
@@ -66,6 +82,23 @@ The built-in terminal tools are also implemented directly in VS Code, not as an 
 These tools are registered with VS Code's internal `ILanguageModelToolsService` and have direct access to services like `ITerminalService` and `IChatService`.
 
 This extension now follows the same broad registration model, but through the public extension API: `vscode.lm.registerTool(...)`.
+
+## Multiline workaround
+
+VS Code's `executeCommand` API can corrupt multiline commands above a certain size threshold due to a macOS PTY buffering issue (see [vscode#296955](https://github.com/microsoft/vscode/issues/296955)). When enabled, the extension works around this by sending multiline commands line-by-line via `sendText` instead of `executeCommand`, with raw output capture via `onDidWriteTerminalData`.
+
+This is controlled by a setting:
+
+```json
+"terminal-mcp.multilineWorkaround": true
+```
+
+| Value | Behavior |
+|-------|----------|
+| `true` (default) | Multiline commands use `sendText` line-by-line to avoid PTY corruption |
+| `false` | Multiline commands use `executeCommand` like single-line commands |
+
+Set to `false` to test whether a VS Code build includes the upstream fix.
 
 ## Notes
 

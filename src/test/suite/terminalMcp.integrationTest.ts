@@ -182,6 +182,23 @@ suite('Terminal MCP integration', () => {
 			assert.ok(found, `Expected byte count ${LARGE_MULTILINE_WC_EXPECTED_COUNT} in output:\n${output.slice(-500)}`);
 	});
 
+	(RUN_DIAGNOSTIC_TESTS ? test : test.skip)('multiline reuse without workaround: executeCommand path for multiline', async function () {
+		this.timeout(60000);
+		await requireShellIntegration(this);
+		const config = vscode.workspace.getConfiguration('terminal-mcp');
+		await config.update('multilineWorkaround', false, vscode.ConfigurationTarget.Workspace);
+		try {
+			const first = await runCommand(MULTILINE_WC_COMMAND);
+			assertFinished(first);
+			assertCount(first, MULTILINE_WC_EXPECTED_COUNT);
+			const second = await runCommand(MULTILINE_WC_COMMAND);
+			assertFinished(second);
+			assertCount(second, MULTILINE_WC_EXPECTED_COUNT);
+		} finally {
+			await config.update('multilineWorkaround', undefined, vscode.ConfigurationTarget.Workspace);
+		}
+	});
+
 	(RUN_DIAGNOSTIC_TESTS ? test : test.skip)('single long line stress: increasing sizes via executeCommand', async function () {
 		this.timeout(120000);
 		await requireShellIntegration(this);
