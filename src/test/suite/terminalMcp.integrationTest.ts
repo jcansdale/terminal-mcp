@@ -66,6 +66,16 @@ function isFallback(output: string): boolean {
 	return /Shell integration did not activate/.test(output);
 }
 
+function extractExitCode(output: string): number | undefined {
+	const match = output.match(/\(exit code: (\d+)\)/);
+	return match ? parseInt(match[1], 10) : undefined;
+}
+
+function assertExitCode(output: string, expected: number): void {
+	const actual = extractExitCode(output);
+	assert.strictEqual(actual, expected, `Expected exit code ${expected} but got ${actual} in output:\n${output}`);
+}
+
 async function findTerminal(): Promise<vscode.Terminal | undefined> {
 	const deadline = Date.now() + 5000;
 	while (Date.now() < deadline) {
@@ -106,6 +116,42 @@ suite('Terminal MCP integration', () => {
 			const output = await runCommand(client, 'echo terminal-mcp-e2e');
 			assertFinished(output);
 			assert.ok(/terminal-mcp-e2e/.test(output) || isFallback(output), 'Expected output or fallback warning');
+		} finally {
+			await client.close();
+		}
+	});
+
+	test('exit code: successful command returns exit code 0', async function () {
+		const client = await createClient();
+		try {
+			await requireShellIntegration(client, this);
+			const output = await runCommand(client, 'true');
+			assertFinished(output);
+			assertExitCode(output, 0);
+		} finally {
+			await client.close();
+		}
+	});
+
+	test('exit code: failing command returns non-zero exit code', async function () {
+		const client = await createClient();
+		try {
+			await requireShellIntegration(client, this);
+			const output = await runCommand(client, 'false');
+			assertFinished(output);
+			assertExitCode(output, 1);
+		} finally {
+			await client.close();
+		}
+	});
+
+	test('exit code: custom exit code is preserved', async function () {
+		const client = await createClient();
+		try {
+			await requireShellIntegration(client, this);
+			const output = await runCommand(client, '(exit 42)');
+			assertFinished(output);
+			assertExitCode(output, 42);
 		} finally {
 			await client.close();
 		}
