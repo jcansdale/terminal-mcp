@@ -145,7 +145,7 @@ suite('Terminal MCP integration', () => {
 		assertCount(second, MULTILINE_WC_EXPECTED_COUNT);
 	});
 
-	test('line-by-line mitigation: 100-line payload sent as individual sendText calls', async function () {
+	test('single sendText mitigation: 100-line payload sent as a single sendText call', async function () {
 		this.timeout(60000);
 			const terminal = await requireShellIntegration(this);
 
@@ -155,18 +155,8 @@ suite('Terminal MCP integration', () => {
 			});
 
 			// Build the command as: echo 'line1\nline2\n...' | wc -c
-			// but send each physical line of the command separately
-			const lines = LARGE_MULTILINE_WC_COMMAND.split('\n');
-			for (let i = 0; i < lines.length; i++) {
-				// sendText with addNewline=false for all but the last line
-				if (i < lines.length - 1) {
-					terminal.sendText(lines[i], false);
-					terminal.sendText('\n', false);
-				} else {
-					// Last line — send with addNewline=true to execute
-					terminal.sendText(lines[i], true);
-				}
-			}
+			// and send it in one sendText call
+			terminal.sendText(LARGE_MULTILINE_WC_COMMAND, true);
 
 			const deadline = Date.now() + 30000;
 			let found = false;
