@@ -66,6 +66,43 @@ interface ExecutionRecord {
 	warning?: string;
 }
 
+/**
+ * Clean raw terminal output by extracting the command output from OSC 633 markers
+ * and stripping escape sequences, prompts, and other terminal artifacts.
+ */
+export function cleanTerminalOutput(output: string): string {
+	// Try to extract just the command output between 633;C (pre-exec) and 633;D (post-exec)
+	// Look for the LAST 633;C...633;D block which contains our command's output
+	const execMatch = output.match(/\]633;C([^]*?)\]633;D/g);
+	if (execMatch && execMatch.length > 0) {
+		// Get the last execution block
+		const lastBlock = execMatch[execMatch.length - 1];
+		// Extract content between 633;C and 633;D
+		const contentMatch = lastBlock.match(/\]633;C([^]*?)\]633;D/);
+		if (contentMatch) {
+			output = contentMatch[1];
+		}
+	}
+
+	// Strip any remaining OSC sequences
+	output = output.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
+	output = output.replace(/\]633;[^\]]*(?=\]|$|\n)/g, '');
+	output = output.replace(/\]633;[^\n]*/g, '');
+	// Strip CSI sequences (require at least one digit to avoid matching [main etc)
+	output = output.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
+	output = output.replace(/\[[0-9;?]+[mJKHABCDEFGsu]/g, '');
+	output = output.replace(/\[\?2004[hl]/g, '');
+	// Strip remaining control chars
+	output = output.replace(/[\x1b\x07]/g, '');
+	// Strip zsh prompt artifacts
+	output = output.replace(/%\s*$/gm, '');
+	// Remove lines that are just whitespace
+	output = output.replace(/^\s+$/gm, '');
+	// Collapse multiple blank lines
+	output = output.replace(/\n{2,}/g, '\n');
+	return output.trim();
+}
+
 export class TerminalSessionManager implements vscode.Disposable {
 	private readonly _disposables: vscode.Disposable[] = [];
 	private readonly _executions = new Map<string, ExecutionRecord>();
@@ -105,6 +142,11 @@ export class TerminalSessionManager implements vscode.Disposable {
 		vscode.Disposable.from(...this._disposables).dispose();
 	}
 
+	public resetSharedTerminal(): void {
+		this._sharedTerminal?.dispose();
+		this._sharedTerminal = undefined;
+	}
+
 	public async runInTerminal(params: RunInTerminalParams): Promise<RunInTerminalResult> {
 		const terminal = params.isBackground ? this._createBackgroundTerminal(params.goal) : this._getOrCreateSharedTerminal();
 		const execution = this._createExecutionRecord(terminal, params);
@@ -127,6 +169,67 @@ export class TerminalSessionManager implements vscode.Disposable {
 				output: this._finalizeOutput(execution.output),
 				warning: execution.warning,
 				timedOut: false,
+			};
+		}
+
+		const isMultiline = params.command.includes('\n');
+
+		if (isMultiline) {
+			// Multiline commands: executeCommand() writes the entire command in one
+			// PTY chunk and corrupts above a size threshold. Instead we:
+			// 1. Send lines one-by-one via sendText to avoid PTY corruption
+			// 2. Capture output via onDidWriteTerminalData (raw, same as useRawDataCapture)
+			// 3. Use onDidEndTerminalShellExecution for completion detection.
+			//    Zsh's own PREEXEC/PRECMD hooks fire 633;C/633;D naturally when the
+			//    last line is submitted — no need to inject 633;C manually.
+			// 4. Wait 2s after completion to let any trailing output arrive before finalizing.
+			//    VS Code can fire onDidEndTerminalShellExecution before the corresponding
+			//    onDidWriteTerminalData event for the same PTY chunk (the chunk that contains
+			//    both the command output and the OSC 633;D sequence).
+			execution.useRawDataCapture = true;
+
+			let capturedExitCode: number | undefined = undefined;
+
+			// Send the command lines first, then register the completion listener.
+			// This avoids picking up a stale 633;D from the previous command's
+			// prompt-setup sequence (PRECMD fires 633;D just before the prompt
+			// is displayed, and we must not collide with that event).
+			const lines = params.command.split('\n');
+			for (let i = 0; i < lines.length; i++) {
+				const isLast = i === lines.length - 1;
+				if (isLast) {
+					terminal.sendText(lines[i], true);
+				} else {
+					terminal.sendText(lines[i], false);
+					terminal.sendText('\n', false);
+				}
+			}
+
+			// Register AFTER sending — by this point zsh's PREEXEC has fired 633;C
+			// (the command is executing) so the next 633;D will be ours.
+			const completionDisposable = vscode.window.onDidEndTerminalShellExecution(event => {
+				if (event.terminal === terminal) {
+					capturedExitCode = event.exitCode;
+					execution.exitCode = event.exitCode;
+					execution.completed = true;
+					execution.resolveCompletion();
+					completionDisposable.dispose();
+				}
+			});
+
+			if (params.isBackground) {
+				return { id: execution.id };
+			}
+
+			const didTimeOut = await this._awaitWithTimeout(execution.completionPromise, Math.max(0, params.timeout));
+			if (!didTimeOut) {
+				await new Promise(r => setTimeout(r, 2000));
+			}
+			return {
+				output: this._finalizeOutput(execution.output),
+				exitCode: didTimeOut ? undefined : capturedExitCode,
+				timedOut: didTimeOut,
+				warning: execution.warning,
 			};
 		}
 
@@ -192,6 +295,7 @@ export class TerminalSessionManager implements vscode.Disposable {
 		}
 		return execution;
 	}
+
 
 	private _createBackgroundTerminal(goal: string): vscode.Terminal {
 		const profile = this._getChatTerminalProfile();
@@ -363,7 +467,7 @@ export class TerminalSessionManager implements vscode.Disposable {
 	}
 
 	private _finalizeOutput(output: string): string {
-		return output.trimEnd();
+		return cleanTerminalOutput(output);
 	}
 
 	private async _awaitWithTimeout(promise: Promise<void>, timeoutMs: number): Promise<boolean> {
