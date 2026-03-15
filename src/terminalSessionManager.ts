@@ -175,6 +175,10 @@ export class TerminalSessionManager implements vscode.Disposable {
 		const useMultilineWorkaround = vscode.workspace.getConfiguration('terminal-mcp').get<boolean>('multilineWorkaround', true);
 		const isMultiline = useMultilineWorkaround && params.command.includes('\n');
 
+		if (!useMultilineWorkaround && params.command.includes('\n')) {
+			execution.warning = 'Multiline workaround disabled. Large multiline commands may fail due to PTY buffer limits.';
+		}
+
 		if (isMultiline) {
 			// Multiline commands: executeCommand() writes the entire command in one
 			// PTY chunk and corrupts above a size threshold. Instead we:
