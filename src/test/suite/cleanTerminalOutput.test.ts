@@ -87,6 +87,6 @@ L19 ccc[1m[7m%[27m[1m[0m
  1 file changed, 2 insertions(+)
 ]633;D;0`;
 		const result = cleanTerminalOutput(raw);
-		assert.strictEqual(result, '[main abc1234] Fix something\n1 file changed, 2 insertions(+)');
+		assert.strictEqual(result, '[main abc1234] Fix something\n 1 file changed, 2 insertions(+)');
 	});
 });
