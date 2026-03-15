@@ -55,6 +55,15 @@ In the current extension implementation, `title`, `path`, `args`, `icon`, and `e
 
 If the chat-specific setting is not configured, the extension falls back to the window's normal default integrated terminal profile.
 
+## VS Code's built-in terminal tools
+
+The built-in terminal tools are implemented directly in VS Code (not as an MCP server):
+
+- **Location:** [`src/vs/workbench/contrib/terminalContrib/chatAgentTools/browser/tools/`](https://github.com/microsoft/vscode/tree/main/src/vs/workbench/contrib/terminalContrib/chatAgentTools/browser/tools)
+- **Tool IDs:** `run_in_terminal`, `await_terminal`, `get_terminal_output`, `kill_terminal`, `terminal_selection`, `terminal_last_command`, `create_and_run_task`, `get_task_output`, `run_task`
+
+These tools are registered with VS Code's internal `ILanguageModelToolsService` and have direct access to services like `ITerminalService` and `IChatService`.
+
 ## Notes
 
 - This extension is intended for self-hosting or VS Code Insiders-style experimentation.
