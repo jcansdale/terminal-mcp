@@ -201,8 +201,7 @@ export class TerminalSessionManager implements vscode.Disposable {
 				if (isLast) {
 					terminal.sendText(lines[i], true);
 				} else {
-					terminal.sendText(lines[i], false);
-					terminal.sendText('\n', false);
+					terminal.sendText(lines[i] + '\n', false);
 				}
 			}
 
