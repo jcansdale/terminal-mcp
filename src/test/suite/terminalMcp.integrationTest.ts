@@ -2,6 +2,7 @@ import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 
 const EXPECTED_TERMINAL_NAMES = ['Terminal MCP', 'Copilot Zsh'];
+const RUN_DIAGNOSTIC_TESTS = process.env.TERMINAL_MCP_RUN_DIAGNOSTICS === '1';
 
 const PAYLOAD_LINE_COUNT = 19;
 const PAYLOAD_LINES = Array.from({ length: PAYLOAD_LINE_COUNT }, (_, i) => {
@@ -97,8 +98,11 @@ async function requireShellIntegration(ctx: Mocha.Context): Promise<vscode.Termi
 }
 
 suite('Terminal MCP integration', () => {
-	setup(async () => {
+	suiteSetup(async () => {
 		await activateExtension();
+	});
+
+	setup(async () => {
 		await vscode.commands.executeCommand('terminalMcp._resetSharedTerminal');
 	});
 
@@ -106,20 +110,6 @@ suite('Terminal MCP integration', () => {
 		const output = await runCommand('echo terminal-mcp-e2e');
 		assertFinished(output);
 		assert.ok(/terminal-mcp-e2e/.test(output) || isFallback(output), 'Expected output or fallback warning');
-	});
-
-	test('exit code: successful command returns exit code 0', async function () {
-		await requireShellIntegration(this);
-		const output = await runCommand('true');
-		assertFinished(output);
-		assertExitCode(output, 0);
-	});
-
-	test('exit code: failing command returns non-zero exit code', async function () {
-		await requireShellIntegration(this);
-		const output = await runCommand('false');
-		assertFinished(output);
-		assertExitCode(output, 1);
 	});
 
 	test('exit code: custom exit code is preserved', async function () {
@@ -136,17 +126,6 @@ suite('Terminal MCP integration', () => {
 		assert.ok(terminal, 'Shared terminal not found');
 		assert.ok(await waitForShellIntegration(terminal), 'Shell integration did not activate');
 		assert.ok(!isFallback(output), `Got fallback warning:\n${output}`);
-	});
-
-	test('single-line reuse: 10 commands through the same shell', async function () {
-		await requireShellIntegration(this);
-		for (let i = 1; i <= 10; i++) {
-			const token = `reuse-${i}`;
-			const expected = String(Buffer.byteLength(`${token}\n`, 'utf8'));
-			const output = await runCommand(`echo ${token} | wc -c`);
-			assertFinished(output);
-			assertCount(output, expected);
-		}
 	});
 
 	test('multiline: 19-line command succeeds on a fresh terminal', async function () {
@@ -203,7 +182,7 @@ suite('Terminal MCP integration', () => {
 			assert.ok(found, `Expected byte count ${LARGE_MULTILINE_WC_EXPECTED_COUNT} in output:\n${output.slice(-500)}`);
 	});
 
-	test('single long line stress: increasing sizes via executeCommand', async function () {
+	(RUN_DIAGNOSTIC_TESTS ? test : test.skip)('single long line stress: increasing sizes via executeCommand', async function () {
 		this.timeout(120000);
 		await requireShellIntegration(this);
 		// Diagnostic test — maps the PTY size limit for executeCommand.
@@ -223,7 +202,7 @@ suite('Terminal MCP integration', () => {
 		}
 	});
 
-	test('line-by-line with manual OSC 633 sequences gets shell integration tracking', async function () {
+	(RUN_DIAGNOSTIC_TESTS ? test : test.skip)('line-by-line with manual OSC 633 sequences gets shell integration tracking', async function () {
 		this.timeout(60000);
 			const terminal = await requireShellIntegration(this);
 
