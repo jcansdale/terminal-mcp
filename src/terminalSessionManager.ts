@@ -66,6 +66,43 @@ interface ExecutionRecord {
 	warning?: string;
 }
 
+/**
+ * Clean raw terminal output by extracting the command output from OSC 633 markers
+ * and stripping escape sequences, prompts, and other terminal artifacts.
+ */
+export function cleanTerminalOutput(output: string): string {
+	// Try to extract just the command output between 633;C (pre-exec) and 633;D (post-exec)
+	// Look for the LAST 633;C...633;D block which contains our command's output
+	const execMatch = output.match(/\]633;C([^]*?)\]633;D/g);
+	if (execMatch && execMatch.length > 0) {
+		// Get the last execution block
+		const lastBlock = execMatch[execMatch.length - 1];
+		// Extract content between 633;C and 633;D
+		const contentMatch = lastBlock.match(/\]633;C([^]*?)\]633;D/);
+		if (contentMatch) {
+			output = contentMatch[1];
+		}
+	}
+
+	// Strip any remaining OSC sequences
+	output = output.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
+	output = output.replace(/\]633;[^\]]*(?=\]|$|\n)/g, '');
+	output = output.replace(/\]633;[^\n]*/g, '');
+	// Strip CSI sequences
+	output = output.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
+	output = output.replace(/\[[0-9;?]*[mJKHABCDEFGsu]/g, '');
+	output = output.replace(/\[\?2004[hl]/g, '');
+	// Strip remaining control chars
+	output = output.replace(/[\x1b\x07]/g, '');
+	// Strip zsh prompt artifacts
+	output = output.replace(/%\s*$/gm, '');
+	// Remove lines that are just whitespace
+	output = output.replace(/^\s+$/gm, '');
+	// Collapse multiple blank lines
+	output = output.replace(/\n{2,}/g, '\n');
+	return output.trim();
+}
+
 export class TerminalSessionManager implements vscode.Disposable {
 	private readonly _disposables: vscode.Disposable[] = [];
 	private readonly _executions = new Map<string, ExecutionRecord>();
@@ -430,7 +467,7 @@ export class TerminalSessionManager implements vscode.Disposable {
 	}
 
 	private _finalizeOutput(output: string): string {
-		return output.trimEnd();
+		return cleanTerminalOutput(output);
 	}
 
 	private async _awaitWithTimeout(promise: Promise<void>, timeoutMs: number): Promise<boolean> {

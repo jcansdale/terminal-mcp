@@ -8,6 +8,7 @@ export function run(): Promise<void> {
 		timeout: 60000,
 	});
 
+	mocha.addFile(path.resolve(__dirname, './cleanTerminalOutput.test.js'));
 	mocha.addFile(path.resolve(__dirname, './terminalMcp.integrationTest.js'));
 
 	return new Promise((resolve, reject) => {
