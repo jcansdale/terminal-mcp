@@ -88,9 +88,9 @@ export function cleanTerminalOutput(output: string): string {
 	output = output.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
 	output = output.replace(/\]633;[^\]]*(?=\]|$|\n)/g, '');
 	output = output.replace(/\]633;[^\n]*/g, '');
-	// Strip CSI sequences
+	// Strip CSI sequences (require at least one digit to avoid matching [main etc)
 	output = output.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
-	output = output.replace(/\[[0-9;?]*[mJKHABCDEFGsu]/g, '');
+	output = output.replace(/\[[0-9;?]+[mJKHABCDEFGsu]/g, '');
 	output = output.replace(/\[\?2004[hl]/g, '');
 	// Strip remaining control chars
 	output = output.replace(/[\x1b\x07]/g, '');

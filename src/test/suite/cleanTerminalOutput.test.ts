@@ -21,15 +21,15 @@ suite('cleanTerminalOutput', () => {
 	});
 
 	test('strips CSI sequences (ANSI escape codes)', () => {
-		const raw = '\x1b[1m\x1b[7m%\x1b[27m\x1b[1m\x1b[0mhello';
+		const raw = '\x1b[1m\x1b[31mhello\x1b[0m world';
 		const result = cleanTerminalOutput(raw);
-		assert.strictEqual(result, 'hello');
+		assert.strictEqual(result, 'hello world');
 	});
 
 	test('strips CSI sequences without ESC prefix', () => {
-		const raw = '[1m[7m%[27m[1m[0mhello';
+		const raw = '[1m[31mhello[0m world';
 		const result = cleanTerminalOutput(raw);
-		assert.strictEqual(result, 'hello');
+		assert.strictEqual(result, 'hello world');
 	});
 
 	test('strips bracketed paste markers', () => {
