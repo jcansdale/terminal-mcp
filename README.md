@@ -1,14 +1,15 @@
 # Terminal MCP
 
-VS Code extension for experimenting with a terminal-focused MCP server implementation.
+VS Code extension for experimenting with direct terminal tool registration.
 
-This project exposes terminal-oriented MCP tools from a local extension-hosted HTTP server so you can iterate on behavior outside VS Code's built-in implementation.
+This project registers terminal-oriented language model tools directly from the extension host so you can iterate on behavior outside VS Code's built-in implementation without running an HTTP MCP server.
 
 ## Status
 
 - Intended for local development and GitHub-hosted experimentation.
 - Uses proposed VS Code APIs, so it currently needs VS Code Insiders plus `--enable-proposed-api=jcansdale.terminal-mcp`.
 - `package.json` remains marked `private` to avoid accidental npm publication.
+- Uses direct `vscode.lm.registerTool(...)` registration instead of `mcpServerDefinitionProviders`.
 
 ## What it exposes
 
@@ -55,19 +56,21 @@ In the current extension implementation, `title`, `path`, `args`, `icon`, and `e
 
 If the chat-specific setting is not configured, the extension falls back to the window's normal default integrated terminal profile.
 
-## VS Code's built-in terminal tools
+## Comparison with VS Code's built-in terminal tools
 
-The built-in terminal tools are implemented directly in VS Code (not as an MCP server):
+The built-in terminal tools are also implemented directly in VS Code, not as an MCP server:
 
 - **Location:** [`src/vs/workbench/contrib/terminalContrib/chatAgentTools/browser/tools/`](https://github.com/microsoft/vscode/tree/main/src/vs/workbench/contrib/terminalContrib/chatAgentTools/browser/tools)
 - **Tool IDs:** `run_in_terminal`, `await_terminal`, `get_terminal_output`, `kill_terminal`, `terminal_selection`, `terminal_last_command`, `create_and_run_task`, `get_task_output`, `run_task`
 
 These tools are registered with VS Code's internal `ILanguageModelToolsService` and have direct access to services like `ITerminalService` and `IChatService`.
 
+This extension now follows the same broad registration model, but through the public extension API: `vscode.lm.registerTool(...)`.
+
 ## Notes
 
 - This extension is intended for self-hosting or VS Code Insiders-style experimentation.
-- It uses `contributes.mcpServerDefinitionProviders` and registers a local HTTP MCP server from the extension host.
+- It does not expose an HTTP MCP endpoint.
 - It relies on shell integration for the best `awaitTerminal` and exit-code behavior.
 - It does not have full parity with VS Code's internal terminal tool implementation; it approximates that behavior using the public extension API.
 
@@ -82,5 +85,4 @@ npm test
 
 Useful commands after loading the extension:
 
-- `Terminal MCP: Show Server URL`
-- `Terminal MCP: Restart Server`
+- `Terminal MCP: Show Shell Integration Status`
