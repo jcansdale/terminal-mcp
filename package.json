@@ -1,7 +1,7 @@
 {
 	"name": "terminal-mcp",
 	"displayName": "Terminal MCP",
-	"description": "A VS Code extension that exposes terminal tools through a local MCP server.",
+	"description": "A VS Code extension that registers terminal tools directly with the language model tools API.",
 	"version": "0.0.1",
 	"private": true,
 	"publisher": "jcansdale",
@@ -30,29 +30,108 @@
 		"onStartupFinished"
 	],
 	"enabledApiProposals": [
-		"terminalDataWriteEvent",
-		"mcpToolDefinitions"
+		"terminalDataWriteEvent"
 	],
 	"main": "./dist/extension.js",
 	"contributes": {
 		"commands": [
 			{
-				"command": "terminalMcp.showServerUrl",
-				"title": "Terminal MCP: Show Server URL"
-			},
-			{
-				"command": "terminalMcp.restartServer",
-				"title": "Terminal MCP: Restart Server"
-			},
-			{
 				"command": "terminalMcp.showShellIntegrationStatus",
 				"title": "Terminal MCP: Show Shell Integration Status"
 			}
 		],
-		"mcpServerDefinitionProviders": [
+		"languageModelTools": [
 			{
-				"id": "terminal-mcp.provider",
-				"label": "Terminal MCP"
+				"name": "runInTerminal",
+				"displayName": "Run in Terminal",
+				"toolReferenceName": "runInTerminal",
+				"canBeReferencedInPrompt": true,
+				"modelDescription": "Execute a shell command in a VS Code terminal. Background executions return a terminal ID. Foreground executions wait for completion when shell integration is available.",
+				"userDescription": "Run commands in the terminal.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"command": {
+							"type": "string",
+							"description": "The command to run in the terminal."
+						},
+						"explanation": {
+							"type": "string",
+							"description": "A one-sentence description of what the command does. This is shown before execution."
+						},
+						"goal": {
+							"type": "string",
+							"description": "A short description of the purpose of the command."
+						},
+						"isBackground": {
+							"type": "boolean",
+							"description": "Whether the command should continue running in the background."
+						},
+						"timeout": {
+							"type": "number",
+							"description": "Timeout in milliseconds for foreground execution. Use 0 for no timeout."
+						}
+					},
+					"required": ["command", "explanation", "goal", "isBackground", "timeout"]
+				}
+			},
+			{
+				"name": "awaitTerminal",
+				"displayName": "Await Terminal",
+				"toolReferenceName": "awaitTerminal",
+				"canBeReferencedInPrompt": true,
+				"modelDescription": "Wait for a background terminal command to complete. Returns the output, exit code, or timeout status.",
+				"userDescription": "Wait for a background terminal command to complete.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"description": "The ID of the terminal to await."
+						},
+						"timeout": {
+							"type": "number",
+							"description": "Timeout in milliseconds. Use 0 for no timeout."
+						}
+					},
+					"required": ["id", "timeout"]
+				}
+			},
+			{
+				"name": "getTerminalOutput",
+				"displayName": "Get Terminal Output",
+				"toolReferenceName": "getTerminalOutput",
+				"canBeReferencedInPrompt": true,
+				"modelDescription": "Get the output of a terminal command previously started with runInTerminal.",
+				"userDescription": "Get output from a tracked terminal command.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"description": "The ID of the terminal to check."
+						}
+					},
+					"required": ["id"]
+				}
+			},
+			{
+				"name": "killTerminal",
+				"displayName": "Kill Terminal",
+				"toolReferenceName": "killTerminal",
+				"canBeReferencedInPrompt": true,
+				"modelDescription": "Kill a tracked terminal by its ID and return the output captured so far.",
+				"userDescription": "Kill a tracked terminal by ID.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"description": "The ID of the tracked terminal to kill."
+						}
+					},
+					"required": ["id"]
+				}
 			}
 		]
 	},
@@ -68,10 +147,7 @@
 		"check": "tsc --noEmit -p ./tsconfig.json",
 		"test": "npm run build && node ./dist/test/runTest.js"
 	},
-	"dependencies": {
-		"@modelcontextprotocol/sdk": "^1.27.1",
-		"zod": "^4.1.5"
-	},
+	"dependencies": {},
 	"devDependencies": {
 		"@types/mocha": "^10.0.10",
 		"@types/node": "^22.13.10",
