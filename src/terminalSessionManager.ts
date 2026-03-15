@@ -182,7 +182,7 @@ export class TerminalSessionManager implements vscode.Disposable {
 		if (isMultiline) {
 			// Multiline commands: executeCommand() writes the entire command in one
 			// PTY chunk and corrupts above a size threshold. Instead we:
-			// 1. Send lines one-by-one via sendText to avoid PTY corruption
+			// 1. Send the entire command as a single sendText call to avoid PTY corruption
 			// 2. Capture output via onDidWriteTerminalData (raw, same as useRawDataCapture)
 			// 3. Use onDidEndTerminalShellExecution for completion detection.
 			//    Zsh's own PREEXEC/PRECMD hooks fire 633;C/633;D naturally when the
@@ -195,19 +195,11 @@ export class TerminalSessionManager implements vscode.Disposable {
 
 			let capturedExitCode: number | undefined = undefined;
 
-			// Send the command lines first, then register the completion listener.
+			// Send the command first, then register the completion listener.
 			// This avoids picking up a stale 633;D from the previous command's
 			// prompt-setup sequence (PRECMD fires 633;D just before the prompt
 			// is displayed, and we must not collide with that event).
-			const lines = params.command.split('\n');
-			for (let i = 0; i < lines.length; i++) {
-				const isLast = i === lines.length - 1;
-				if (isLast) {
-					terminal.sendText(lines[i], true);
-				} else {
-					terminal.sendText(lines[i] + '\n', false);
-				}
-			}
+			terminal.sendText(params.command, true);
 
 			// Register AFTER sending — by this point zsh's PREEXEC has fired 633;C
 			// (the command is executing) so the next 633;D will be ours.
